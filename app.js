@@ -587,3 +587,54 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-export-csv').onclick = () => {
+    const rows = [['commitment_id', 'title', 'mode', 'date', 'logged_value', 'target', 'threshold_pct']];
+    state.commitments.forEach(c => {
+      generateSlots(c).forEach(s => {
+        const val = c.logs[s.date] !== undefined ? c.logs[s.date] : '';
+        rows.push([c.id, `"${c.title.replace(/"/g, '""')}"`, c.mode, s.date, val, c.target || 1, c.threshold || 100]);
+      });
+    });
+    downloadFile(rows.map(r => r.join(',')).join('\n'), `ccc-tracker-${getLocalDateStr()}.csv`, 'text/csv');
+  };
+
+  document.getElementById('btn-export-json').onclick = () => {
+    downloadFile(JSON.stringify(state, null, 2), `ccc-backup-${getLocalDateStr()}.json`, 'application/json');
+  };
+
+  document.getElementById('input-import-json').onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!Array.isArray(parsed.commitments)) throw new Error('Invalid format');
+        state = parsed;
+        saveState();
+        renderAll();
+        alert('Backup restored.');
+      } catch {
+        alert('Invalid backup JSON file.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+
+  updateCountdown();
+  setInterval(updateCountdown, 30000);
+  renderAll();
+});
+
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
