@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0f1115" />
+  <meta name="theme-color" id="meta-theme-color" content="#0d1015" />
   <title>CCC Tracker</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
@@ -14,7 +14,10 @@
       <h1>CCC Tracker</h1>
       <p class="subtitle">Offline &bull; 24h Lock &bull; <span id="today-label"></span></p>
     </div>
-    <div id="countdown-badge" class="badge">Lock in --:--</div>
+    <div class="header-actions">
+      <div id="countdown-badge" class="badge">Lock in --:--</div>
+      <button id="btn-theme-toggle" class="btn-theme" title="Switch Daylight / Nightlight" aria-label="Toggle Theme">&#9728;&#65039;</button>
+    </div>
   </header>
 
   <!-- TAB 1: DASHBOARD (TODAY'S CHECK-IN) -->
@@ -43,21 +46,43 @@
     <div id="analytics-list" class="list-stack"></div>
   </main>
 
-  <!-- TAB 4: BACKUP & EXPORT -->
+  <!-- TAB 4: BACKUP, SHARE & ABOUT -->
   <main id="view-backup" class="view">
-    <section class="card">
-      <h2>Data Backup &amp; Export</h2>
-      <p class="muted">All records are stored locally on your device. Export plain-text CSV for external analysis or JSON for full state backup.</p>
-      <div class="btn-group">
-        <button id="btn-export-csv" class="btn-secondary">Export All Logs (CSV)</button>
-        <button id="btn-export-json" class="btn-secondary">Backup Config &amp; Logs (JSON)</button>
-      </div>
-      <hr class="divider" />
-      <label class="file-label">
-        <span>Restore from JSON Backup</span>
-        <input type="file" id="input-import-json" accept=".json" />
-      </label>
-    </section>
+    <div class="list-stack">
+      <section class="card">
+        <h2>Share CCC Tracker</h2>
+        <p class="muted">Share this offline-ready web app link with others so they can install it on their home screen.</p>
+        <div class="share-url-box" id="app-url-display"></div>
+        <div class="btn-group">
+          <button id="btn-share-app" class="btn-primary">Share App Link</button>
+          <button id="btn-copy-link" class="btn-secondary">Copy Link to Clipboard</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Data Backup &amp; Export</h2>
+        <p class="muted">All records remain strictly on your device. Export plain-text CSV for external analysis or JSON for full state backup.</p>
+        <div class="btn-group">
+          <button id="btn-export-csv" class="btn-secondary">Export All Logs (CSV)</button>
+          <button id="btn-export-json" class="btn-secondary">Backup Config &amp; Logs (JSON)</button>
+        </div>
+        <hr class="divider" />
+        <label class="file-label">
+          <span>Restore from JSON Backup</span>
+          <input type="file" id="input-import-json" accept=".json" />
+        </label>
+      </section>
+
+      <footer class="about-card">
+        <div class="about-title">About &amp; Disclaimer</div>
+        <p class="muted">
+          <strong>CCC Tracker</strong> (Commitment, Compliance &amp; Consistency) is an offline-first personal accountability utility.
+          All logs are stored exclusively in your browser's local storage; no data is transmitted to external servers.
+          Clearing browser site data without a JSON backup will permanently erase local records.
+        </p>
+        <p class="copyright">&copy; 2026 Abhishek Verma. All rights reserved.</p>
+      </footer>
+    </div>
   </main>
 
   <!-- NEW COMMITMENT MODAL -->
@@ -142,7 +167,7 @@
     <button class="nav-btn active" data-target="view-dashboard">Today</button>
     <button class="nav-btn" data-target="view-timeline">Timeline</button>
     <button class="nav-btn" data-target="view-analytics">Analytics</button>
-    <button class="nav-btn" data-target="view-backup">Backup</button>
+    <button class="nav-btn" data-target="view-backup">More</button>
   </nav>
 
   <script src="app.js"></script>
