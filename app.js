@@ -55,6 +55,26 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  mirrorBackupToAndroidDocuments();
+}
+
+async function mirrorBackupToAndroidDocuments() {
+  try {
+    const cap = window.Capacitor;
+    if (!cap || !cap.isNativePlatform || !cap.isNativePlatform()) return;
+    const { Filesystem } = cap.Plugins;
+    if (!Filesystem) return;
+
+    await Filesystem.writeFile({
+      path: 'CCCTracker/ccc-auto-backup.json',
+      data: JSON.stringify(state, null, 2),
+      directory: 'DOCUMENTS',
+      encoding: 'utf8',
+      recursive: true
+    });
+  } catch (e) {
+    // Silent fallback if storage permission is restricted on older Android versions
+  }
 }
 
 function generateSlots(c) {
@@ -647,7 +667,32 @@ document.addEventListener('DOMContentLoaded', () => {
   renderAll();
 });
 
-function downloadFile(content, filename, mimeType) {
+async function downloadFile(content, filename, mimeType) {
+  try {
+    const cap = window.Capacitor;
+    if (cap && cap.isNativePlatform && cap.isNativePlatform()) {
+      const { Filesystem, Share } = cap.Plugins;
+      if (Filesystem && Share) {
+        const writeRes = await Filesystem.writeFile({
+          path: filename,
+          data: content,
+          directory: 'CACHE',
+          encoding: 'utf8'
+        });
+        await Share.share({
+          title: filename,
+          text: 'CCC Tracker Export',
+          url: writeRes.uri,
+          dialogTitle: 'Save to Google Drive or Local Storage'
+        });
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn('Native share fallback:', err);
+  }
+
+  // Standard Web Browser Fallback
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
