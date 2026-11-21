@@ -1,6 +1,6 @@
-const STORAGE_KEY = 'ccc_tracker_v1';
+const STORAGE_KEY = 'ccc_tracker_v2';
+let expandedAccordions = new Set();
 
-// Helper: Local YYYY-MM-DD (avoids UTC offset bugs)
 function getLocalDateStr(dateObj = new Date()) {
   const y = dateObj.getFullYear();
   const m = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -18,12 +18,11 @@ function formatShortDate(dateStr) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-// State Management
 let state = loadState();
 
 function loadState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('ccc_tracker_v1');
     return raw ? JSON.parse(raw) : { commitments: [] };
   } catch {
     return { commitments: [] };
@@ -34,7 +33,6 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-// Generate Active Slots based on Frequency Config
 function generateSlots(c) {
   const slots = [];
   let cursor = parseLocalDate(c.startDate);
@@ -58,11 +56,13 @@ function generateSlots(c) {
   return slots;
 }
 
-// Evaluate Metrics (Compliance, Consistency, Completion)
 function evaluateCommitment(c, todayStr) {
   const slots = generateSlots(c);
   let elapsedCount = 0;
-  let compliantCount = 0;
+  let completedCount = 0;
+  let partialCount = 0;
+  let missedCount = 0;
+  let remainingCount = 0;
   let totalScoreSum = 0;
   let currentStreak = 0;
   let longestStreak = 0;
@@ -75,16 +75,21 @@ function evaluateCommitment(c, todayStr) {
 
     let status = 'future';
     let score = 0;
+    let pct = 0;
     let isCompliant = false;
 
-    if (!isFuture) {
+    if (isFuture) {
+      remainingCount++;
+    } else {
       if (rawVal !== undefined && rawVal !== null) {
         if (c.mode === 'binary') {
           score = rawVal === 1 ? 1 : 0;
+          pct = score * 100;
           isCompliant = score === 1;
         } else {
-          score = Math.min(1, rawVal / c.target);
-          isCompliant = (rawVal / c.target) >= (c.threshold / 100);
+          pct = Math.min(100, Math.round((rawVal / c.target) * 100));
+          score = pct / 100;
+          isCompliant = pct >= c.threshold;
         }
       }
 
@@ -92,173 +97,301 @@ function evaluateCommitment(c, todayStr) {
         elapsedCount++;
         totalScoreSum += score;
         if (isCompliant) {
-          compliantCount++;
+          completedCount++;
           currentStreak++;
           longestStreak = Math.max(longestStreak, currentStreak);
           status = 'done';
         } else {
           currentStreak = 0;
-          status = (rawVal > 0) ? 'partial' : 'missed';
+          if (rawVal > 0) {
+            partialCount++;
+            status = 'partial';
+          } else {
+            missedCount++;
+            status = 'missed';
+          }
         }
       } else if (isToday) {
         if (rawVal !== undefined && rawVal !== null) {
           elapsedCount++;
           totalScoreSum += score;
           if (isCompliant) {
-            compliantCount++;
+            completedCount++;
             currentStreak++;
             longestStreak = Math.max(longestStreak, currentStreak);
             status = 'done';
+          } else if (rawVal > 0) {
+            partialCount++;
+            status = 'partial';
           } else {
-            status = rawVal > 0 ? 'partial' : 'today';
+            missedCount++;
+            status = 'missed';
           }
         } else {
+          remainingCount++;
           status = 'today';
         }
       }
     }
 
-    return { ...slot, rawVal, status, isToday, isPast, isFuture };
+    return { ...slot, rawVal, pct, status, isToday, isPast, isFuture };
   });
 
-  // Rolling weekly adjustment if freq === 'rolling'
-  let compliancePct = elapsedCount > 0 ? Math.round((compliantCount / elapsedCount) * 100) : 100;
+  let compliancePct = elapsedCount > 0 ? Math.round((completedCount / elapsedCount) * 100) : 100;
   if (c.freq === 'rolling' && elapsedCount > 0) {
     const weeksElapsed = Math.ceil(elapsedCount / 7);
     const expectedToDate = Math.min(elapsedCount, weeksElapsed * c.rollingTarget);
-    compliancePct = expectedToDate > 0 ? Math.min(100, Math.round((compliantCount / expectedToDate) * 100)) : 100;
+    compliancePct = expectedToDate > 0 ? Math.min(100, Math.round((completedCount / expectedToDate) * 100)) : 100;
   }
 
   const completionPct = Math.round((totalScoreSum / c.totalDays) * 100);
 
   return {
     slots: enrichedSlots,
+    totalScheduled: c.totalDays,
+    completedCount,
+    partialCount,
+    missedCount,
+    remainingCount,
     compliancePct,
     completionPct,
     currentStreak,
-    longestStreak,
-    compliantCount
+    longestStreak
   };
 }
 
-// Render Dashboard
-function render() {
+function renderAll() {
   const todayStr = getLocalDateStr();
   document.getElementById('today-label').textContent = formatShortDate(todayStr);
 
-  const container = document.getElementById('commitments-list');
+  renderDashboard(todayStr);
+  renderTimeline(todayStr);
+  renderAnalytics(todayStr);
+}
+
+/* TAB 1: DASHBOARD */
+function renderDashboard(todayStr) {
+  const container = document.getElementById('dashboard-list');
   container.innerHTML = '';
 
   if (state.commitments.length === 0) {
-    container.innerHTML = `<div class="card"><p class="muted">No active commitments yet. Tap "+ New Commitment" below to configure your first tracked block.</p></div>`;
+    container.innerHTML = `<div class="card"><p class="muted">No commitments configured yet. Tap "+ New" above to create one.</p></div>`;
+    return;
+  }
+
+  // Sort active-today commitments first, grayed-out inactive commitments last
+  const items = state.commitments.map(c => {
+    const stats = evaluateCommitment(c, todayStr);
+    const todaySlot = stats.slots.find(s => s.isToday);
+    return { c, stats, todaySlot, isActiveToday: Boolean(todaySlot) };
+  }).sort((a, b) => Number(b.isActiveToday) - Number(a.isActiveToday));
+
+  items.forEach(({ c, todaySlot, isActiveToday }) => {
+    const row = document.createElement('div');
+    row.className = `dash-item ${isActiveToday ? '' : 'inactive-today'}`;
+
+    if (!isActiveToday) {
+      row.innerHTML = `
+        <div class="dash-top">
+          <div>
+            <div class="dash-title">${escapeHtml(c.title)}</div>
+            <div class="dash-sub">Not scheduled for today (Off-day / Outside window)</div>
+          </div>
+          <span class="status-pill">Inactive Today</span>
+        </div>`;
+      container.appendChild(row);
+      return;
+    }
+
+    const loggedVal = c.logs[todayStr];
+    let pillHtml = `<span class="status-pill active">Day ${todaySlot.index}/${c.totalDays} &bull; Pending</span>`;
+    if (loggedVal !== undefined && loggedVal !== null) {
+      if (todaySlot.status === 'done') pillHtml = `<span class="status-pill done">Completed</span>`;
+      else if (todaySlot.status === 'partial') pillHtml = `<span class="status-pill partial">${todaySlot.pct}% Logged</span>`;
+      else pillHtml = `<span class="status-pill">Missed (0%)</span>`;
+    }
+
+    let actionHtml = '';
+    if (c.mode === 'binary') {
+      actionHtml = `
+        <div class="dash-action binary-group">
+          <button class="${loggedVal === 1 ? 'btn-primary' : 'btn-secondary'}" onclick="logBinary('${c.id}', '${todayStr}', 1)">Done</button>
+          <button class="${loggedVal === 0 ? 'btn-primary' : 'btn-secondary'}" onclick="logBinary('${c.id}', '${todayStr}', 0)">Missed</button>
+        </div>`;
+    } else {
+      const currentPct = (loggedVal !== undefined && loggedVal !== null)
+        ? Math.min(100, Math.round((loggedVal / c.target) * 100))
+        : 0;
+      const currentUnits = (loggedVal !== undefined && loggedVal !== null) ? loggedVal : 0;
+
+      actionHtml = `
+        <div class="dash-action slider-wrap">
+          <div class="slider-header">
+            <span>Progress: <strong id="lbl-pct-${c.id}">${currentPct}%</strong> (<span id="lbl-unit-${c.id}">${currentUnits}</span> / ${c.target} ${escapeHtml(c.unit)})</span>
+            <span>Min: ${c.threshold}%</span>
+          </div>
+          <div class="slider-row">
+            <input type="range" id="rng-${c.id}" min="0" max="100" step="5" value="${currentPct}"
+              oninput="previewSlider('${c.id}', ${c.target}, this.value)" />
+            <button class="btn-primary btn-sm" onclick="commitSlider('${c.id}', '${todayStr}', ${c.target})">Save</button>
+          </div>
+        </div>`;
+    }
+
+    row.innerHTML = `
+      <div class="dash-top">
+        <div>
+          <div class="dash-title">${escapeHtml(c.title)}</div>
+          <div class="dash-sub">Day ${todaySlot.index} of ${c.totalDays} &bull; ${c.mode === 'binary' ? 'Binary' : `Target: ${c.target} ${escapeHtml(c.unit)}`}</div>
+        </div>
+        ${pillHtml}
+      </div>
+      ${actionHtml}
+    `;
+    container.appendChild(row);
+  });
+}
+
+/* TAB 2: EXPANDABLE TIMELINE */
+function renderTimeline(todayStr) {
+  const container = document.getElementById('timeline-accordion');
+  container.innerHTML = '';
+
+  if (state.commitments.length === 0) {
+    container.innerHTML = `<div class="card"><p class="muted">No commitments to inspect.</p></div>`;
     return;
   }
 
   state.commitments.forEach(c => {
     const stats = evaluateCommitment(c, todayStr);
-    const todaySlot = stats.slots.find(s => s.isToday);
+    const isOpen = expandedAccordions.has(c.id);
 
+    const item = document.createElement('div');
+    item.className = `acc-item ${isOpen ? 'open' : ''}`;
+
+    const cellsHtml = stats.slots.map(s => {
+      let valLabel = 'Upcoming';
+      if (s.isPast || (s.isToday && s.rawVal !== undefined)) {
+        if (c.mode === 'binary') {
+          valLabel = s.rawVal === 1 ? 'Done' : 'Missed';
+        } else {
+          valLabel = s.rawVal !== undefined ? `${s.rawVal} ${c.unit} (${s.pct}%)` : '0 (Missed)';
+        }
+      } else if (s.isToday) {
+        valLabel = 'Open Today';
+      }
+
+      const lockIcon = s.isPast ? ' &#128274;' : '';
+      return `
+        <div class="date-cell ${s.status}">
+          <span class="dc-top">D${s.index} &bull; ${formatShortDate(s.date)}${lockIcon}</span>
+          <span class="dc-val">${valLabel}</span>
+        </div>`;
+    }).join('');
+
+    item.innerHTML = `
+      <button class="acc-header" onclick="toggleAccordion('${c.id}')">
+        <div>
+          <div class="dash-title">${escapeHtml(c.title)}</div>
+          <div class="dash-sub">${stats.completedCount}/${stats.totalScheduled} Completed &bull; Starts ${formatShortDate(c.startDate)}</div>
+        </div>
+        <span class="chevron">&#9660;</span>
+      </button>
+      <div class="acc-body">
+        <div class="date-log-list">${cellsHtml}</div>
+      </div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+/* TAB 3: ANALYTICS BREAKDOWN */
+function renderAnalytics(todayStr) {
+  const container = document.getElementById('analytics-list');
+  container.innerHTML = '';
+
+  if (state.commitments.length === 0) {
+    container.innerHTML = `<div class="card"><p class="muted">No analytics available yet.</p></div>`;
+    return;
+  }
+
+  state.commitments.forEach(c => {
+    const s = evaluateCommitment(c, todayStr);
     const card = document.createElement('div');
     card.className = 'card';
 
-    const freqDesc = c.freq === 'daily'
-      ? `Daily &bull; ${c.totalDays} days`
-      : c.freq === 'specific'
-      ? `Custom Days &bull; ${c.totalDays} active days`
-      : `Rolling ${c.rollingTarget}d/wk &bull; ${c.totalDays} days`;
-
-    let todayHtml = '';
-    if (!todaySlot) {
-      todayHtml = `<div class="today-box off-day">Rest Day / Outside Active Window (No logging required)</div>`;
-    } else if (c.mode === 'binary') {
-      const val = c.logs[todayStr];
-      todayHtml = `
-        <div class="today-box">
-          <div style="font-size:0.82rem;font-weight:600;">Day ${todaySlot.index} Check-In (Binary)</div>
-          <div class="log-controls">
-            <button class="${val === 1 ? 'btn-primary' : 'btn-secondary'}" onclick="logEntry('${c.id}', '${todayStr}', 1)">Done</button>
-            <button class="${val === 0 ? 'btn-primary' : 'btn-secondary'}" onclick="logEntry('${c.id}', '${todayStr}', 0)">Missed</button>
-          </div>
-        </div>`;
-    } else {
-      const currentVal = c.logs[todayStr] ?? '';
-      todayHtml = `
-        <div class="today-box">
-          <div style="font-size:0.82rem;font-weight:600;">Day ${todaySlot.index} Check-In (Target: ${c.target} ${c.unit}, Min ${c.threshold}%)</div>
-          <div class="log-controls">
-            <input type="number" id="inp-${c.id}" value="${currentVal}" min="0" step="any" placeholder="0" />
-            <span style="font-size:0.82rem;color:var(--muted);">${c.unit}</span>
-            <button class="btn-primary" onclick="logSpectrum('${c.id}', '${todayStr}')">Save</button>
-          </div>
-        </div>`;
-    }
-
-    const gridHtml = stats.slots.map(s => {
-      const icon = s.isPast ? '&#128274;' : '';
-      return `<div class="slot ${s.status}" title="${s.date}">
-        <span class="s-day">D${s.index} ${icon}</span>
-        <span class="s-date">${formatShortDate(s.date)}</span>
-      </div>`;
-    }).join('');
-
     card.innerHTML = `
-      <div class="card-top">
+      <div class="dash-top">
         <div>
-          <div class="card-title">${escapeHtml(c.title)}</div>
-          <div class="card-meta">${freqDesc} &bull; Starts ${formatShortDate(c.startDate)}</div>
+          <div class="dash-title">${escapeHtml(c.title)}</div>
+          <div class="dash-sub">Compliance: ${s.compliancePct}% &bull; Overall Completion: ${s.completionPct}%</div>
         </div>
         <button class="btn-delete" onclick="deleteCommitment('${c.id}')">Delete</button>
       </div>
 
-      <div class="metrics-row">
-        <div><div class="metric-val">${stats.compliancePct}%</div><div class="metric-lbl">Compliance</div></div>
-        <div><div class="metric-val">${stats.completionPct}%</div><div class="metric-lbl">Completion</div></div>
-        <div><div class="metric-val">${stats.currentStreak}d</div><div class="metric-lbl">Streak (Best ${stats.longestStreak}d)</div></div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width:${s.completionPct}%"></div>
       </div>
 
-      ${todayHtml}
-
-      <div class="grid-header">
-        <span>Timeline (Past days locked)</span>
-        <span>${stats.compliantCount}/${c.totalDays} Compliant</span>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-num">${s.totalScheduled}</div><div class="stat-lbl">Scheduled</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:#4ade80;">${s.completedCount}</div><div class="stat-lbl">Completed</div></div>
+        <div class="stat-box"><div class="stat-num">${s.remainingCount}</div><div class="stat-lbl">Yet to Complete</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:#f87171;">${s.missedCount}</div><div class="stat-lbl">Missed</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:#fbbf24;">${s.partialCount}</div><div class="stat-lbl">Partial</div></div>
+        <div class="stat-box"><div class="stat-num">${s.currentStreak}d / ${s.longestStreak}d</div><div class="stat-lbl">Streak / Best</div></div>
       </div>
-      <div class="slot-grid">${gridHtml}</div>
     `;
-
     container.appendChild(card);
   });
 }
 
-// Actions (Enforcing strict Today-only writes)
-window.logEntry = function(id, dateStr, value) {
-  if (dateStr !== getLocalDateStr()) return alert('24h Lock: Past or future days cannot be modified.');
+/* INTERACTIONS & 24H LOCK GUARD */
+window.logBinary = function(id, dateStr, value) {
+  if (dateStr !== getLocalDateStr()) return alert('24h Lock: Past or future days cannot be edited.');
   const c = state.commitments.find(x => x.id === id);
   if (!c) return;
   c.logs[dateStr] = value;
   saveState();
-  render();
+  renderAll();
 };
 
-window.logSpectrum = function(id, dateStr) {
-  if (dateStr !== getLocalDateStr()) return alert('24h Lock: Past or future days cannot be modified.');
-  const inp = document.getElementById(`inp-${id}`);
-  const val = parseFloat(inp.value);
-  if (isNaN(val) || val < 0) return alert('Enter a valid non-negative number.');
-  window.logEntry(id, dateStr, val);
+window.previewSlider = function(id, target, pctVal) {
+  const pct = Number(pctVal);
+  const units = Number(((pct / 100) * target).toFixed(2));
+  document.getElementById(`lbl-pct-${id}`).textContent = `${pct}%`;
+  document.getElementById(`lbl-unit-${id}`).textContent = units;
+};
+
+window.commitSlider = function(id, dateStr, target) {
+  if (dateStr !== getLocalDateStr()) return alert('24h Lock: Past or future days cannot be edited.');
+  const pct = Number(document.getElementById(`rng-${id}`).value);
+  const units = Number(((pct / 100) * target).toFixed(2));
+  const c = state.commitments.find(x => x.id === id);
+  if (!c) return;
+  c.logs[dateStr] = units;
+  saveState();
+  renderAll();
+};
+
+window.toggleAccordion = function(id) {
+  if (expandedAccordions.has(id)) expandedAccordions.delete(id);
+  else expandedAccordions.add(id);
+  renderTimeline(getLocalDateStr());
 };
 
 window.deleteCommitment = function(id) {
-  if (!confirm('Delete this commitment and its local logs?')) return;
+  if (!confirm('Delete this commitment and all its logged history?')) return;
   state.commitments = state.commitments.filter(x => x.id !== id);
+  expandedAccordions.delete(id);
   saveState();
-  render();
+  renderAll();
 };
 
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
 }
 
-// Countdown Timer to Midnight Lock
 function updateCountdown() {
   const now = new Date();
   const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
@@ -268,7 +401,6 @@ function updateCountdown() {
   document.getElementById('countdown-badge').textContent = `Lock in ${hrs}h ${mins}m`;
 }
 
-// Modal & Navigation Wiring
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cfg-start').value = getLocalDateStr();
 
@@ -327,16 +459,17 @@ document.addEventListener('DOMContentLoaded', () => {
     saveState();
     e.target.reset();
     document.getElementById('cfg-start').value = getLocalDateStr();
+    document.getElementById('box-specific-days').classList.add('hidden');
+    document.getElementById('box-rolling-days').classList.add('hidden');
+    document.getElementById('box-spectrum').classList.add('hidden');
     modal.classList.add('hidden');
-    render();
+    renderAll();
   });
 
-  // CSV Export
   document.getElementById('btn-export-csv').onclick = () => {
     const rows = [['commitment_id', 'title', 'mode', 'date', 'logged_value', 'target', 'threshold_pct']];
     state.commitments.forEach(c => {
-      const slots = generateSlots(c);
-      slots.forEach(s => {
+      generateSlots(c).forEach(s => {
         const val = c.logs[s.date] !== undefined ? c.logs[s.date] : '';
         rows.push([c.id, `"${c.title.replace(/"/g, '""')}"`, c.mode, s.date, val, c.target || 1, c.threshold || 100]);
       });
@@ -344,12 +477,10 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadFile(rows.map(r => r.join(',')).join('\n'), `ccc-tracker-${getLocalDateStr()}.csv`, 'text/csv');
   };
 
-  // JSON Export
   document.getElementById('btn-export-json').onclick = () => {
     downloadFile(JSON.stringify(state, null, 2), `ccc-backup-${getLocalDateStr()}.json`, 'application/json');
   };
 
-  // JSON Import
   document.getElementById('input-import-json').onchange = e => {
     const file = e.target.files[0];
     if (!file) return;
@@ -360,7 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!Array.isArray(parsed.commitments)) throw new Error('Invalid format');
         state = parsed;
         saveState();
-        render();
+        renderAll();
         alert('Backup restored.');
       } catch {
         alert('Invalid backup JSON file.');
@@ -375,7 +506,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   updateCountdown();
   setInterval(updateCountdown, 30000);
-  render();
+  renderAll();
 });
 
 function downloadFile(content, filename, mimeType) {
@@ -387,4 +518,3 @@ function downloadFile(content, filename, mimeType) {
   a.click();
   URL.revokeObjectURL(url);
 }
-
