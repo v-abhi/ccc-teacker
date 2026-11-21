@@ -4,7 +4,7 @@ const APP_PUBLIC_URL = 'https://v-abhi.github.io/ccc-tracker/';
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 let expandedAccordions = new Set();
-let calendarViewMonth = new Map(); // Tracks active YYYY-MM per commitment in Timeline tab
+let calendarViewMonth = new Map();
 
 /* Theme Management (Daylight / Nightlight) */
 function applyTheme(theme) {
@@ -265,23 +265,30 @@ function renderDashboard(todayStr) {
   });
 }
 
-/* TAB 2: COMPACT SINGLE-MONTH PAGINATED CALENDAR */
+/* TAB 2: COMPACT SINGLE-MONTH BOUNDED CALENDAR */
 function buildSingleMonthCalendarHtml(c, stats, todayStr) {
   if (!stats.slots.length) return '';
 
   const slotMap = new Map();
   stats.slots.forEach(s => slotMap.set(s.date, s));
 
-  // Default displayed month to current month (or commitment start month if current is before start)
+  const minYm = stats.slots[0].date.slice(0, 7);
+  const maxYm = stats.slots[stats.slots.length - 1].date.slice(0, 7);
+
   if (!calendarViewMonth.has(c.id)) {
     const todayYm = todayStr.slice(0, 7);
-    const startYm = stats.slots[0].date.slice(0, 7);
-    const endYm = stats.slots[stats.slots.length - 1].date.slice(0, 7);
-    if (todayYm >= startYm && todayYm <= endYm) calendarViewMonth.set(c.id, todayYm);
-    else calendarViewMonth.set(c.id, startYm);
+    if (todayYm >= minYm && todayYm <= maxYm) calendarViewMonth.set(c.id, todayYm);
+    else calendarViewMonth.set(c.id, minYm);
   }
 
-  const activeYm = calendarViewMonth.get(c.id);
+  let activeYm = calendarViewMonth.get(c.id);
+  if (activeYm < minYm) activeYm = minYm;
+  if (activeYm > maxYm) activeYm = maxYm;
+  calendarViewMonth.set(c.id, activeYm);
+
+  const canPrev = activeYm > minYm;
+  const canNext = activeYm < maxYm;
+
   const [year, month] = activeYm.split('-').map(Number);
 
   const activeCols = new Set();
@@ -329,9 +336,9 @@ function buildSingleMonthCalendarHtml(c, stats, todayStr) {
   const monthTitle = `${MONTHS_SHORT[month - 1]} ${year}`;
   return `
     <div class="cal-nav-bar">
-      <button type="button" class="cal-nav-btn" onclick="changeCalMonth('${c.id}', -1)">&larr; Prev</button>
+      <button type="button" class="cal-nav-btn" ${canPrev ? '' : 'disabled'} onclick="changeCalMonth('${c.id}', -1)">&larr; Prev</button>
       <span class="month-title">${monthTitle}</span>
-      <button type="button" class="cal-nav-btn" onclick="changeCalMonth('${c.id}', 1)">Next &rarr;</button>
+      <button type="button" class="cal-nav-btn" ${canNext ? '' : 'disabled'} onclick="changeCalMonth('${c.id}', 1)">Next &rarr;</button>
     </div>
     ${weekdayHeaderHtml}
     <div class="cal-grid">${cells.join('')}</div>
@@ -379,7 +386,7 @@ function renderTimeline(todayStr) {
   });
 }
 
-/* TAB 3: ANALYTICS BREAKDOWN */
+/* TAB 3: COMPACT ANALYTICS BREAKDOWN */
 function renderAnalytics(todayStr) {
   const container = document.getElementById('analytics-list');
   container.innerHTML = '';
@@ -392,28 +399,29 @@ function renderAnalytics(todayStr) {
   state.commitments.forEach(c => {
     const s = evaluateCommitment(c, todayStr);
     const card = document.createElement('div');
-    card.className = 'card';
+    card.className = 'ana-card';
 
     card.innerHTML = `
-      <div class="dash-top">
-        <div>
-          <div class="dash-title">${escapeHtml(c.title)}</div>
-          <div class="dash-sub">Compliance: ${s.compliancePct}% &bull; Overall Completion: ${s.completionPct}%</div>
+      <div class="ana-row-1">
+        <span class="ana-title">${escapeHtml(c.title)}</span>
+        <div class="ana-right-top">
+          <span class="ana-compliance">Compliance <strong>${s.compliancePct}%</strong></span>
+          <button class="btn-del-icon" title="Delete commitment" onclick="deleteCommitment('${c.id}')">&#128465;</button>
         </div>
-        <button class="btn-delete" onclick="deleteCommitment('${c.id}')">Delete</button>
       </div>
 
-      <div class="progress-bar">
-        <div class="progress-fill" style="width:${s.completionPct}%"></div>
+      <div class="ana-row-2">
+        <span class="ana-completed-txt">${s.completedCount}/${s.totalScheduled} completed</span>
+        <span class="ana-overall-txt">${s.completionPct}% overall</span>
       </div>
 
-      <div class="stat-grid">
-        <div class="stat-box"><div class="stat-num">${s.totalScheduled}</div><div class="stat-lbl">Scheduled</div></div>
-        <div class="stat-box"><div class="stat-num" style="color:var(--green);">${s.completedCount}</div><div class="stat-lbl">Completed</div></div>
-        <div class="stat-box"><div class="stat-num">${s.remainingCount}</div><div class="stat-lbl">Yet to Complete</div></div>
-        <div class="stat-box"><div class="stat-num" style="color:var(--missed-gray);">${s.missedCount}</div><div class="stat-lbl">Missed</div></div>
-        <div class="stat-box"><div class="stat-num" style="color:var(--yellow);">${s.partialCount}</div><div class="stat-lbl">Partial</div></div>
-        <div class="stat-box"><div class="stat-num">${s.currentStreak}d / ${s.longestStreak}d</div><div class="stat-lbl">Streak / Best</div></div>
+      <div class="ana-bar">
+        <div class="ana-bar-fill" style="width:${s.completionPct}%"></div>
+      </div>
+
+      <div class="ana-row-3">
+        <span>${s.remainingCount} remaining &middot; ${s.missedCount} missed &middot; ${s.partialCount} partial</span>
+        <span class="ana-streak">&#128293; ${s.currentStreak}d</span>
       </div>
     `;
     container.appendChild(card);
@@ -458,8 +466,18 @@ window.autoSaveSlider = function(id, dateStr, target, pctVal) {
 };
 
 window.changeCalMonth = function(id, delta) {
-  const currentYm = calendarViewMonth.get(id) || getLocalDateStr().slice(0, 7);
-  calendarViewMonth.set(id, shiftMonthStr(currentYm, delta));
+  const c = state.commitments.find(x => x.id === id);
+  if (!c) return;
+  const slots = generateSlots(c);
+  if (!slots.length) return;
+  const minYm = slots[0].date.slice(0, 7);
+  const maxYm = slots[slots.length - 1].date.slice(0, 7);
+
+  const currentYm = calendarViewMonth.get(id) || minYm;
+  const targetYm = shiftMonthStr(currentYm, delta);
+  if (targetYm < minYm || targetYm > maxYm) return;
+
+  calendarViewMonth.set(id, targetYm);
   renderTimeline(getLocalDateStr());
 };
 
