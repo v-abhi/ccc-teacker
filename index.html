@@ -50,6 +50,17 @@
   <main id="view-backup" class="view">
     <div class="list-stack">
       <section class="card">
+        <h2>Daily Check-In Reminder</h2>
+        <p class="muted">Receive one daily notification to log your open commitments before the midnight lock.</p>
+        <div class="reminder-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;">
+          <input type="time" id="cfg-reminder-time" value="21:30" style="width:auto;margin:0;" />
+          <button id="btn-save-reminder" class="btn-primary btn-sm">Enable Reminder</button>
+          <button id="btn-disable-reminder" class="btn-secondary btn-sm hidden">Turn Off</button>
+        </div>
+        <p id="reminder-status" class="muted" style="margin-top:8px;font-size:0.76rem;">Reminder is currently off.</p>
+      </section>
+
+      <section class="card">
         <h2>Share CCC Tracker</h2>
         <p class="muted">Share this offline-ready web app link with others so they can install it on their home screen.</p>
         <div class="share-url-box" id="app-url-display"></div>
@@ -180,7 +191,7 @@
       }
     };
   </script>
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=9"></script>
 
 </body>
 </html>
