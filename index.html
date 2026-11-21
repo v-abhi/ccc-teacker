@@ -1,1 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f1115" />
+  <title>CCC Tracker</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>CCC Tracker</h1>
+      <p class="subtitle">Offline-First &bull; 24h Immutability Lock</p>
+    </div>
+    <div id="countdown-badge" class="badge">Lock in --:--</div>
+  </header>
+
+  <main id="view-home" class="view active">
+    <section class="banner">
+      <div class="banner-title">Today's Check-In (<span id="today-label"></span>)</div>
+      <div class="banner-sub">Log before midnight. Past days lock permanently at 00:00.</div>
+    </section>
+
+    <div id="commitments-list" class="card-stack"></div>
+
+    <button id="btn-open-modal" class="btn-primary full-width">+ New Commitment</button>
+  </main>
+
+  <main id="view-data" class="view">
+    <section class="card">
+      <h2>Data Backup &amp; Export</h2>
+      <p class="muted">All data lives locally on your device. Export plain-text CSV for analysis or JSON for full backup.</p>
+      <div class="btn-group">
+        <button id="btn-export-csv" class="btn-secondary">Export Logs (CSV)</button>
+        <button id="btn-export-json" class="btn-secondary">Backup Config &amp; Logs (JSON)</button>
+      </div>
+      <hr class="divider" />
+      <label class="file-label">
+        <span>Restore from JSON Backup</span>
+        <input type="file" id="input-import-json" accept=".json" />
+      </label>
+    </section>
+  </main>
+
+  <!-- New Commitment Modal -->
+  <div id="modal-new" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>New Commitment</h2>
+        <button id="btn-close-modal" class="btn-icon">&times;</button>
+      </div>
+      <form id="form-commitment">
+        <label>Task Title
+          <input type="text" id="cfg-title" placeholder="e.g., Read Thinking, Fast and Slow" required />
+        </label>
+
+        <div class="row-2">
+          <label>Start Date
+            <input type="date" id="cfg-start" required />
+          </label>
+          <label>Total Active Days
+            <input type="number" id="cfg-days" min="1" max="365" value="20" required />
+          </label>
+        </div>
+
+        <label>Schedule Frequency
+          <select id="cfg-freq">
+            <option value="daily">Strict Daily (Every Calendar Day)</option>
+            <option value="specific">Specific Days of Week (e.g., Weekends)</option>
+            <option value="rolling">Rolling Weekly Target (e.g., Any X days/week)</option>
+          </select>
+        </label>
+
+        <div id="box-specific-days" class="sub-box hidden">
+          <span class="sub-label">Select Active Days:</span>
+          <div class="day-pills">
+            <label><input type="checkbox" value="1" checked /><span>M</span></label>
+            <label><input type="checkbox" value="2" checked /><span>T</span></label>
+            <label><input type="checkbox" value="3" checked /><span>W</span></label>
+            <label><input type="checkbox" value="4" checked /><span>T</span></label>
+            <label><input type="checkbox" value="5" checked /><span>F</span></label>
+            <label><input type="checkbox" value="6" /><span>S</span></label>
+            <label><input type="checkbox" value="0" /><span>S</span></label>
+          </div>
+        </div>
+
+        <div id="box-rolling-days" class="sub-box hidden">
+          <label>Required Compliant Days per 7-Day Week
+            <input type="number" id="cfg-rolling-target" min="1" max="7" value="3" />
+          </label>
+        </div>
+
+        <label>Tracking Mode
+          <select id="cfg-mode">
+            <option value="binary">Binary (Done / Missed)</option>
+            <option value="spectrum">Spectrum (Numeric Target + Threshold)</option>
+          </select>
+        </label>
+
+        <div id="box-spectrum" class="sub-box hidden">
+          <div class="row-2">
+            <label>Daily Target
+              <input type="number" id="cfg-target" min="1" step="any" value="20" />
+            </label>
+            <label>Unit Label
+              <input type="text" id="cfg-unit" placeholder="pages / mins" value="pages" />
+            </label>
+          </div>
+          <label>Min Compliance Threshold (<span id="thresh-val">80</span>%)
+            <input type="range" id="cfg-threshold" min="10" max="100" step="5" value="80" />
+          </label>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-modal" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary">Create Commitment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-target="view-home">Commitments</button>
+    <button class="nav-btn" data-target="view-data">Export / Backup</button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
 
