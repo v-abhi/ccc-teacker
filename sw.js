@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ccc-tracker-cache-v5';
+const CACHE_NAME = 'ccc-tracker-cache-v6';
 const ASSETS = [
   './',
   './index.html',
