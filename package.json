@@ -1,6 +1,6 @@
 {
   "name": "ccc-tracker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Offline-first Commitment, Compliance & Consistency Tracker",
   "private": true,
   "dependencies": {
@@ -8,6 +8,7 @@
     "@capacitor/app": "^6.0.1",
     "@capacitor/core": "^6.1.2",
     "@capacitor/filesystem": "^6.0.1",
+    "@capacitor/local-notifications": "^6.1.0",
     "@capacitor/share": "^6.0.1"
   },
   "devDependencies": {
