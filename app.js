@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'ccc_tracker_v2';
 const THEME_KEY = 'ccc_tracker_theme';
 const APP_PUBLIC_URL = 'https://v-abhi.github.io/ccc-tracker/';
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 let expandedAccordions = new Set();
 
 /* Theme Management (Daylight / Nightlight) */
@@ -30,7 +31,7 @@ function parseLocalDate(dateStr) {
 
 function formatShortDate(dateStr) {
   const d = parseLocalDate(dateStr);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 
 let state = loadState();
@@ -266,7 +267,83 @@ function renderDashboard(todayStr) {
   });
 }
 
-/* TAB 2: EXPANDABLE TIMELINE */
+/* TAB 2: 7-COLUMN MONTHLY CALENDAR TIMELINE */
+function buildMonthlyCalendarsHtml(c, stats) {
+  if (!stats.slots.length) return '';
+
+  const slotMap = new Map();
+  stats.slots.forEach(s => slotMap.set(s.date, s));
+
+  // Determine active weekday columns (Monday=0 .. Sunday=6) to highlight headers
+  const activeCols = new Set();
+  if (c.freq === 'specific') {
+    c.specificDays.forEach(jsDay => activeCols.add((Number(jsDay) + 6) % 7));
+  } else {
+    [0, 1, 2, 3, 4, 5, 6].forEach(col => activeCols.add(col));
+  }
+
+  const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const weekdayHeaderHtml = `<div class="cal-weekdays">${
+    weekdayLabels.map((lbl, idx) => `<span class="${activeCols.has(idx) ? 'wk-active' : ''}">${lbl}</span>`).join('')
+  }</div>`;
+
+  // Collect all unique YYYY-MM months spanned by the commitment's slots
+  const monthKeys = [];
+  const seenMonths = new Set();
+  stats.slots.forEach(s => {
+    const ym = s.date.slice(0, 7);
+    if (!seenMonths.has(ym)) {
+      seenMonths.add(ym);
+      monthKeys.push(ym);
+    }
+  });
+
+  return monthKeys.map(ym => {
+    const [year, month] = ym.split('-').map(Number);
+    const firstOfMonth = new Date(year, month - 1, 1);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const startOffset = (firstOfMonth.getDay() + 6) % 7; // Monday-first offset (0..6)
+
+    const cells = [];
+    // Leading blank padding cells
+    for (let i = 0; i < startOffset; i++) {
+      cells.push(`<div class="cal-cell blank"></div>`);
+    }
+
+    // Calendar days 1..daysInMonth
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const slot = slotMap.get(dateStr);
+
+      if (!slot) {
+        // Off-day / Unscheduled day -> completely blank/black cell
+        cells.push(`<div class="cal-cell blank"></div>`);
+      } else {
+        const dd = String(day).padStart(2, '0');
+        const mmm = MONTHS_SHORT[month - 1];
+        cells.push(`
+          <div class="cal-cell ${slot.status}" title="${dateStr} (${slot.status})">
+            <span class="cal-dd">${dd}</span>
+            <span class="cal-mmm">${mmm}</span>
+          </div>`);
+      }
+    }
+
+    // Trailing blank padding cells to complete the final 7-day row cleanly
+    while (cells.length % 7 !== 0) {
+      cells.push(`<div class="cal-cell blank"></div>`);
+    }
+
+    const monthTitle = `${MONTHS_SHORT[month - 1]} ${year}`;
+    return `
+      <div class="month-block">
+        <div class="month-title">${monthTitle}</div>
+        ${weekdayHeaderHtml}
+        <div class="cal-grid">${cells.join('')}</div>
+      </div>`;
+  }).join('');
+}
+
 function renderTimeline(todayStr) {
   const container = document.getElementById('timeline-accordion');
   container.innerHTML = '';
@@ -283,25 +360,7 @@ function renderTimeline(todayStr) {
     const item = document.createElement('div');
     item.className = `acc-item ${isOpen ? 'open' : ''}`;
 
-    const cellsHtml = stats.slots.map(s => {
-      let valLabel = 'Upcoming';
-      if (s.isPast || (s.isToday && s.rawVal !== undefined)) {
-        if (c.mode === 'binary') {
-          valLabel = s.rawVal === 1 ? 'Done' : 'Missed';
-        } else {
-          valLabel = s.rawVal !== undefined ? `${s.rawVal} ${c.unit} (${s.pct}%)` : '0 (Missed)';
-        }
-      } else if (s.isToday) {
-        valLabel = 'Open Today';
-      }
-
-      const lockIcon = s.isPast ? ' &#128274;' : '';
-      return `
-        <div class="date-cell ${s.status}">
-          <span class="dc-top">D${s.index} &bull; ${formatShortDate(s.date)}${lockIcon}</span>
-          <span class="dc-val">${valLabel}</span>
-        </div>`;
-    }).join('');
+    const calendarsHtml = buildMonthlyCalendarsHtml(c, stats);
 
     item.innerHTML = `
       <button class="acc-header" onclick="toggleAccordion('${c.id}')">
@@ -312,7 +371,14 @@ function renderTimeline(todayStr) {
         <span class="chevron">&#9660;</span>
       </button>
       <div class="acc-body">
-        <div class="date-log-list">${cellsHtml}</div>
+        <div class="cal-legend">
+          <span><i class="leg-dot" style="background:var(--green);"></i>Completed</span>
+          <span><i class="leg-dot" style="background:var(--yellow);"></i>Partial</span>
+          <span><i class="leg-dot" style="background:var(--missed-gray);"></i>Missed</span>
+          <span><i class="leg-dot" style="background:var(--future-bg);border:1px solid var(--future-border);"></i>Scheduled</span>
+          <span><i class="leg-dot" style="background:var(--blank-cell);border:1px solid var(--border);"></i>Off-day</span>
+        </div>
+        ${calendarsHtml}
       </div>
     `;
     container.appendChild(item);
@@ -351,8 +417,8 @@ function renderAnalytics(todayStr) {
         <div class="stat-box"><div class="stat-num">${s.totalScheduled}</div><div class="stat-lbl">Scheduled</div></div>
         <div class="stat-box"><div class="stat-num" style="color:var(--green);">${s.completedCount}</div><div class="stat-lbl">Completed</div></div>
         <div class="stat-box"><div class="stat-num">${s.remainingCount}</div><div class="stat-lbl">Yet to Complete</div></div>
-        <div class="stat-box"><div class="stat-num" style="color:var(--red);">${s.missedCount}</div><div class="stat-lbl">Missed</div></div>
-        <div class="stat-box"><div class="stat-num" style="color:var(--amber);">${s.partialCount}</div><div class="stat-lbl">Partial</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:var(--missed-gray);">${s.missedCount}</div><div class="stat-lbl">Missed</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:var(--yellow);">${s.partialCount}</div><div class="stat-lbl">Partial</div></div>
         <div class="stat-box"><div class="stat-num">${s.currentStreak}d / ${s.longestStreak}d</div><div class="stat-lbl">Streak / Best</div></div>
       </div>
     `;
@@ -416,7 +482,6 @@ function updateCountdown() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Initialize saved theme (defaults to dark / nightlight)
   applyTheme(localStorage.getItem(THEME_KEY) || 'dark');
 
   document.getElementById('btn-theme-toggle').onclick = () => {
@@ -426,7 +491,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('cfg-start').value = getLocalDateStr();
 
-  // Share & Copy App URL
   const shareUrl = window.location.protocol.startsWith('http') ? window.location.href.split('#')[0] : APP_PUBLIC_URL;
   document.getElementById('app-url-display').textContent = shareUrl;
 
@@ -450,7 +514,6 @@ document.addEventListener('DOMContentLoaded', () => {
     alert('App link copied to clipboard!');
   };
 
-  // Bottom Navigation
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -460,7 +523,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Modal Wiring
   const modal = document.getElementById('modal-new');
   document.getElementById('btn-open-modal').onclick = () => modal.classList.remove('hidden');
   document.getElementById('btn-close-modal').onclick = () => modal.classList.add('hidden');
@@ -507,4 +569,62 @@ document.addEventListener('DOMContentLoaded', () => {
     saveState();
     e.target.reset();
     document.getElementById('cfg-start').value = getLocalDateStr();
-    document.getElementById('box-
+    document.getElementById('box-specific-days').classList.add('hidden');
+    document.getElementById('box-rolling-days').classList.add('hidden');
+    document.getElementById('box-spectrum').classList.add('hidden');
+    modal.classList.add('hidden');
+    renderAll();
+  });
+
+  document.getElementById('btn-export-csv').onclick = () => {
+    const rows = [['commitment_id', 'title', 'mode', 'date', 'logged_value', 'target', 'threshold_pct']];
+    state.commitments.forEach(c => {
+      generateSlots(c).forEach(s => {
+        const val = c.logs[s.date] !== undefined ? c.logs[s.date] : '';
+        rows.push([c.id, `"${c.title.replace(/"/g, '""')}"`, c.mode, s.date, val, c.target || 1, c.threshold || 100]);
+      });
+    });
+    downloadFile(rows.map(r => r.join(',')).join('\n'), `ccc-tracker-${getLocalDateStr()}.csv`, 'text/csv');
+  };
+
+  document.getElementById('btn-export-json').onclick = () => {
+    downloadFile(JSON.stringify(state, null, 2), `ccc-backup-${getLocalDateStr()}.json`, 'application/json');
+  };
+
+  document.getElementById('input-import-json').onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!Array.isArray(parsed.commitments)) throw new Error('Invalid format');
+        state = parsed;
+        saveState();
+        renderAll();
+        alert('Backup restored.');
+      } catch {
+        alert('Invalid backup JSON file.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+
+  updateCountdown();
+  setInterval(updateCountdown, 30000);
+  renderAll();
+});
+
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
