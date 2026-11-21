@@ -1,10 +1,12 @@
 const STORAGE_KEY = 'ccc_tracker_v2';
 const THEME_KEY = 'ccc_tracker_theme';
-const APP_PUBLIC_URL = 'https://v-abhi.github.io/ccc-tracker/';
+const REMINDER_KEY = 'ccc_tracker_reminder';
+const APP_PUBLIC_URL = 'https://v-abhi.github.io/ccc-teacker/';
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 let expandedAccordions = new Set();
 let calendarViewMonth = new Map();
+let lastRenderedDate = '';
 
 /* Theme Management (Daylight / Nightlight) */
 function applyTheme(theme) {
@@ -72,9 +74,7 @@ async function mirrorBackupToAndroidDocuments() {
       encoding: 'utf8',
       recursive: true
     });
-  } catch (e) {
-    // Silent fallback if storage permission is restricted on older Android versions
-  }
+  } catch {}
 }
 
 function generateSlots(c) {
@@ -206,6 +206,7 @@ function evaluateCommitment(c, todayStr) {
 
 function renderAll() {
   const todayStr = getLocalDateStr();
+  lastRenderedDate = todayStr;
   document.getElementById('today-label').textContent = formatShortDate(todayStr);
 
   renderDashboard(todayStr);
@@ -213,7 +214,19 @@ function renderAll() {
   renderAnalytics(todayStr);
 }
 
-/* TAB 1: DASHBOARD (SKETCH-ALIGNED MINIMALIST LAYOUT) */
+/* Automatically re-render if calendar day changed while app was backgrounded */
+function syncDateIfRolledOver() {
+  const currentToday = getLocalDateStr();
+  if (lastRenderedDate && currentToday !== lastRenderedDate) {
+    const startInput = document.getElementById('cfg-start');
+    if (startInput && startInput.value === lastRenderedDate) {
+      startInput.value = currentToday;
+    }
+    renderAll();
+  }
+}
+
+/* TAB 1: DASHBOARD */
 function renderDashboard(todayStr) {
   const container = document.getElementById('dashboard-list');
   container.innerHTML = '';
@@ -450,7 +463,10 @@ function renderAnalytics(todayStr) {
 
 /* INTERACTIONS & 24H LOCK GUARD */
 window.toggleBinaryCheckbox = function(id, dateStr, isChecked) {
-  if (dateStr !== getLocalDateStr()) return alert('24h Lock: Past or future days cannot be edited.');
+  if (dateStr !== getLocalDateStr()) {
+    renderAll();
+    return alert('Day rolled over at midnight. View refreshed to today.');
+  }
   const c = state.commitments.find(x => x.id === id);
   if (!c) return;
   if (isChecked) {
@@ -471,7 +487,10 @@ window.previewSlider = function(id, target, pctVal) {
 };
 
 window.autoSaveSlider = function(id, dateStr, target, pctVal) {
-  if (dateStr !== getLocalDateStr()) return alert('24h Lock: Past or future days cannot be edited.');
+  if (dateStr !== getLocalDateStr()) {
+    renderAll();
+    return alert('Day rolled over at midnight. View refreshed to today.');
+  }
   const pct = Number(pctVal);
   const c = state.commitments.find(x => x.id === id);
   if (!c) return;
@@ -521,12 +540,109 @@ function escapeHtml(str) {
 }
 
 function updateCountdown() {
+  syncDateIfRolledOver();
   const now = new Date();
   const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
   const diffMs = midnight - now;
   const hrs = String(Math.floor(diffMs / 3600000)).padStart(2, '0');
   const mins = String(Math.floor((diffMs % 3600000) / 60000)).padStart(2, '0');
   document.getElementById('countdown-badge').textContent = `Lock in ${hrs}h ${mins}m`;
+}
+
+/* Native Daily Notification Scheduler */
+async function configureDailyReminder(timeStr, enable) {
+  const statusEl = document.getElementById('reminder-status');
+  const disableBtn = document.getElementById('btn-disable-reminder');
+  const cap = window.Capacitor;
+
+  if (!cap || !cap.isNativePlatform || !cap.isNativePlatform() || !cap.Plugins?.LocalNotifications) {
+    statusEl.textContent = 'Native reminders work inside the installed Android APK.';
+    return;
+  }
+
+  const { LocalNotifications } = cap.Plugins;
+
+  if (!enable) {
+    await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
+    localStorage.removeItem(REMINDER_KEY);
+    statusEl.textContent = 'Reminder is currently off.';
+    disableBtn.classList.add('hidden');
+    return;
+  }
+
+  const perm = await LocalNotifications.requestPermissions();
+  if (perm.display !== 'granted') {
+    statusEl.textContent = 'Notification permission denied in Android settings.';
+    return;
+  }
+
+  const [hour, minute] = timeStr.split(':').map(Number);
+  await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
+  await LocalNotifications.schedule({
+    notifications: [
+      {
+        id: 1001,
+        title: 'CCC Tracker: Daily Check-In',
+        body: 'Log today’s open commitments before the midnight lock.',
+        schedule: { on: { hour, minute }, repeats: true }
+      }
+    ]
+  });
+
+  localStorage.setItem(REMINDER_KEY, timeStr);
+  statusEl.textContent = `Active: Daily check-in reminder set for ${timeStr}.`;
+  disableBtn.classList.remove('hidden');
+}
+
+function initReminderUI() {
+  const savedTime = localStorage.getItem(REMINDER_KEY);
+  const timeInp = document.getElementById('cfg-reminder-time');
+  const statusEl = document.getElementById('reminder-status');
+  const disableBtn = document.getElementById('btn-disable-reminder');
+
+  if (savedTime && timeInp) {
+    timeInp.value = savedTime;
+    statusEl.textContent = `Active: Daily check-in reminder set for ${savedTime}.`;
+    disableBtn.classList.remove('hidden');
+  }
+
+  document.getElementById('btn-save-reminder')?.addEventListener('click', () => {
+    configureDailyReminder(timeInp.value || '21:30', true);
+  });
+
+  disableBtn?.addEventListener('click', () => {
+    configureDailyReminder(timeInp.value || '21:30', false);
+  });
+}
+
+/* Native App Lifecycle (Resume Refresh + Back Button) */
+function initNativeLifecycle() {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) syncDateIfRolledOver();
+  });
+
+  const cap = window.Capacitor;
+  if (cap && cap.isNativePlatform && cap.isNativePlatform() && cap.Plugins?.App) {
+    const { App } = cap.Plugins;
+
+    App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) syncDateIfRolledOver();
+    });
+
+    App.addListener('backButton', () => {
+      const modal = document.getElementById('modal-new');
+      if (modal && !modal.classList.contains('hidden')) {
+        modal.classList.add('hidden');
+        return;
+      }
+      const activeNav = document.querySelector('.nav-btn.active');
+      if (activeNav && activeNav.dataset.target !== 'view-dashboard') {
+        document.querySelector('.nav-btn[data-target="view-dashboard"]').click();
+        return;
+      }
+      App.exitApp();
+    });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -662,6 +778,8 @@ document.addEventListener('DOMContentLoaded', () => {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 
+  initReminderUI();
+  initNativeLifecycle();
   updateCountdown();
   setInterval(updateCountdown, 30000);
   renderAll();
@@ -692,7 +810,6 @@ async function downloadFile(content, filename, mimeType) {
     console.warn('Native share fallback:', err);
   }
 
-  // Standard Web Browser Fallback
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
