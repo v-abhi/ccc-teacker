@@ -1,5 +1,20 @@
 const STORAGE_KEY = 'ccc_tracker_v2';
+const THEME_KEY = 'ccc_tracker_theme';
+const APP_PUBLIC_URL = 'https://v-abhi.github.io/ccc-tracker/';
 let expandedAccordions = new Set();
+
+/* Theme Management (Daylight / Nightlight) */
+function applyTheme(theme) {
+  const mode = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', mode);
+  localStorage.setItem(THEME_KEY, mode);
+
+  const toggleBtn = document.getElementById('btn-theme-toggle');
+  if (toggleBtn) toggleBtn.innerHTML = mode === 'dark' ? '&#9728;&#65039;' : '&#127769;';
+
+  const metaTheme = document.getElementById('meta-theme-color');
+  if (metaTheme) metaTheme.setAttribute('content', mode === 'dark' ? '#0d1015' : '#ffffff');
+}
 
 function getLocalDateStr(dateObj = new Date()) {
   const y = dateObj.getFullYear();
@@ -175,11 +190,10 @@ function renderDashboard(todayStr) {
   container.innerHTML = '';
 
   if (state.commitments.length === 0) {
-    container.innerHTML = `<div class="card"><p class="muted">No commitments configured yet. Tap "+ New" above to create one.</p></div>`;
+    container.innerHTML = `<div class="card"><p class="muted">No commitments configured yet. Tap "+ New" above to create your first tracked block.</p></div>`;
     return;
   }
 
-  // Sort active-today commitments first, grayed-out inactive commitments last
   const items = state.commitments.map(c => {
     const stats = evaluateCommitment(c, todayStr);
     const todaySlot = stats.slots.find(s => s.isToday);
@@ -335,10 +349,10 @@ function renderAnalytics(todayStr) {
 
       <div class="stat-grid">
         <div class="stat-box"><div class="stat-num">${s.totalScheduled}</div><div class="stat-lbl">Scheduled</div></div>
-        <div class="stat-box"><div class="stat-num" style="color:#4ade80;">${s.completedCount}</div><div class="stat-lbl">Completed</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:var(--green);">${s.completedCount}</div><div class="stat-lbl">Completed</div></div>
         <div class="stat-box"><div class="stat-num">${s.remainingCount}</div><div class="stat-lbl">Yet to Complete</div></div>
-        <div class="stat-box"><div class="stat-num" style="color:#f87171;">${s.missedCount}</div><div class="stat-lbl">Missed</div></div>
-        <div class="stat-box"><div class="stat-num" style="color:#fbbf24;">${s.partialCount}</div><div class="stat-lbl">Partial</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:var(--red);">${s.missedCount}</div><div class="stat-lbl">Missed</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:var(--amber);">${s.partialCount}</div><div class="stat-lbl">Partial</div></div>
         <div class="stat-box"><div class="stat-num">${s.currentStreak}d / ${s.longestStreak}d</div><div class="stat-lbl">Streak / Best</div></div>
       </div>
     `;
@@ -402,8 +416,41 @@ function updateCountdown() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Initialize saved theme (defaults to dark / nightlight)
+  applyTheme(localStorage.getItem(THEME_KEY) || 'dark');
+
+  document.getElementById('btn-theme-toggle').onclick = () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+  };
+
   document.getElementById('cfg-start').value = getLocalDateStr();
 
+  // Share & Copy App URL
+  const shareUrl = window.location.protocol.startsWith('http') ? window.location.href.split('#')[0] : APP_PUBLIC_URL;
+  document.getElementById('app-url-display').textContent = shareUrl;
+
+  document.getElementById('btn-share-app').onclick = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'CCC Tracker',
+          text: 'Offline-first commitment, compliance, and consistency tracker:',
+          url: shareUrl
+        });
+      } catch {}
+    } else {
+      navigator.clipboard?.writeText(shareUrl);
+      alert('App link copied to clipboard: ' + shareUrl);
+    }
+  };
+
+  document.getElementById('btn-copy-link').onclick = () => {
+    navigator.clipboard?.writeText(shareUrl);
+    alert('App link copied to clipboard!');
+  };
+
+  // Bottom Navigation
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -413,6 +460,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // Modal Wiring
   const modal = document.getElementById('modal-new');
   document.getElementById('btn-open-modal').onclick = () => modal.classList.remove('hidden');
   document.getElementById('btn-close-modal').onclick = () => modal.classList.add('hidden');
@@ -459,62 +507,4 @@ document.addEventListener('DOMContentLoaded', () => {
     saveState();
     e.target.reset();
     document.getElementById('cfg-start').value = getLocalDateStr();
-    document.getElementById('box-specific-days').classList.add('hidden');
-    document.getElementById('box-rolling-days').classList.add('hidden');
-    document.getElementById('box-spectrum').classList.add('hidden');
-    modal.classList.add('hidden');
-    renderAll();
-  });
-
-  document.getElementById('btn-export-csv').onclick = () => {
-    const rows = [['commitment_id', 'title', 'mode', 'date', 'logged_value', 'target', 'threshold_pct']];
-    state.commitments.forEach(c => {
-      generateSlots(c).forEach(s => {
-        const val = c.logs[s.date] !== undefined ? c.logs[s.date] : '';
-        rows.push([c.id, `"${c.title.replace(/"/g, '""')}"`, c.mode, s.date, val, c.target || 1, c.threshold || 100]);
-      });
-    });
-    downloadFile(rows.map(r => r.join(',')).join('\n'), `ccc-tracker-${getLocalDateStr()}.csv`, 'text/csv');
-  };
-
-  document.getElementById('btn-export-json').onclick = () => {
-    downloadFile(JSON.stringify(state, null, 2), `ccc-backup-${getLocalDateStr()}.json`, 'application/json');
-  };
-
-  document.getElementById('input-import-json').onchange = e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const parsed = JSON.parse(ev.target.result);
-        if (!Array.isArray(parsed.commitments)) throw new Error('Invalid format');
-        state = parsed;
-        saveState();
-        renderAll();
-        alert('Backup restored.');
-      } catch {
-        alert('Invalid backup JSON file.');
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  }
-
-  updateCountdown();
-  setInterval(updateCountdown, 30000);
-  renderAll();
-});
-
-function downloadFile(content, filename, mimeType) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+    document.getElementById('box-
