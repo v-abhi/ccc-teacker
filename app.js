@@ -2,7 +2,9 @@ const STORAGE_KEY = 'ccc_tracker_v2';
 const THEME_KEY = 'ccc_tracker_theme';
 const APP_PUBLIC_URL = 'https://v-abhi.github.io/ccc-tracker/';
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 let expandedAccordions = new Set();
+let calendarViewMonth = new Map(); // Tracks active YYYY-MM per commitment in Timeline tab
 
 /* Theme Management (Daylight / Nightlight) */
 function applyTheme(theme) {
@@ -32,6 +34,12 @@ function parseLocalDate(dateStr) {
 function formatShortDate(dateStr) {
   const d = parseLocalDate(dateStr);
   return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+}
+
+function shiftMonthStr(ymStr, delta) {
+  const [y, m] = ymStr.split('-').map(Number);
+  const dt = new Date(y, m - 1 + delta, 1);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
 }
 
 let state = loadState();
@@ -185,7 +193,7 @@ function renderAll() {
   renderAnalytics(todayStr);
 }
 
-/* TAB 1: DASHBOARD */
+/* TAB 1: DASHBOARD (SKETCH-ALIGNED MINIMALIST LAYOUT) */
 function renderDashboard(todayStr) {
   const container = document.getElementById('dashboard-list');
   container.innerHTML = '';
@@ -207,74 +215,75 @@ function renderDashboard(todayStr) {
 
     if (!isActiveToday) {
       row.innerHTML = `
-        <div class="dash-top">
+        <div class="binary-row">
           <div>
             <div class="dash-title">${escapeHtml(c.title)}</div>
-            <div class="dash-sub">Not scheduled for today (Off-day / Outside window)</div>
+            <div class="dash-sub">Off-day &bull; Not scheduled today</div>
           </div>
-          <span class="status-pill">Inactive Today</span>
         </div>`;
       container.appendChild(row);
       return;
     }
 
     const loggedVal = c.logs[todayStr];
-    let pillHtml = `<span class="status-pill active">Day ${todaySlot.index}/${c.totalDays} &bull; Pending</span>`;
-    if (loggedVal !== undefined && loggedVal !== null) {
-      if (todaySlot.status === 'done') pillHtml = `<span class="status-pill done">Completed</span>`;
-      else if (todaySlot.status === 'partial') pillHtml = `<span class="status-pill partial">${todaySlot.pct}% Logged</span>`;
-      else pillHtml = `<span class="status-pill">Missed (0%)</span>`;
-    }
 
-    let actionHtml = '';
     if (c.mode === 'binary') {
-      actionHtml = `
-        <div class="dash-action binary-group">
-          <button class="${loggedVal === 1 ? 'btn-primary' : 'btn-secondary'}" onclick="logBinary('${c.id}', '${todayStr}', 1)">Done</button>
-          <button class="${loggedVal === 0 ? 'btn-primary' : 'btn-secondary'}" onclick="logBinary('${c.id}', '${todayStr}', 0)">Missed</button>
+      const isChecked = loggedVal === 1;
+      row.innerHTML = `
+        <div class="binary-row">
+          <div>
+            <div class="dash-title">${escapeHtml(c.title)}</div>
+            <div class="dash-sub">D${todaySlot.index} of ${c.totalDays} &bull; Binary</div>
+          </div>
+          <label class="chk-box-label" aria-label="Mark ${escapeHtml(c.title)} completed">
+            <input type="checkbox" ${isChecked ? 'checked' : ''}
+              onchange="toggleBinaryCheckbox('${c.id}', '${todayStr}', this.checked)" />
+          </label>
         </div>`;
     } else {
-      const currentPct = (loggedVal !== undefined && loggedVal !== null)
-        ? Math.min(100, Math.round((loggedVal / c.target) * 100))
-        : 0;
       const currentUnits = (loggedVal !== undefined && loggedVal !== null) ? loggedVal : 0;
+      const currentPct = Math.min(100, Math.round((currentUnits / c.target) * 100));
 
-      actionHtml = `
-        <div class="dash-action slider-wrap">
-          <div class="slider-header">
-            <span>Progress: <strong id="lbl-pct-${c.id}">${currentPct}%</strong> (<span id="lbl-unit-${c.id}">${currentUnits}</span> / ${c.target} ${escapeHtml(c.unit)})</span>
-            <span>Min: ${c.threshold}%</span>
+      row.innerHTML = `
+        <div class="spec-top">
+          <div>
+            <div class="dash-title">${escapeHtml(c.title)}</div>
+            <div class="dash-sub">D${todaySlot.index} of ${c.totalDays} &bull; Spectrum</div>
           </div>
-          <div class="slider-row">
-            <input type="range" id="rng-${c.id}" min="0" max="100" step="5" value="${currentPct}"
-              oninput="previewSlider('${c.id}', ${c.target}, this.value)" />
-            <button class="btn-primary btn-sm" onclick="commitSlider('${c.id}', '${todayStr}', ${c.target})">Save</button>
-          </div>
-        </div>`;
+          <span class="spec-min">Min: ${c.threshold}%</span>
+        </div>
+        <div class="spec-progress-line">
+          Progress: <strong id="lbl-pct-${c.id}">${currentPct}%</strong> &bull; <span id="lbl-unit-${c.id}">${currentUnits}</span>/${c.target} ${escapeHtml(c.unit)}
+        </div>
+        <input type="range" class="spec-slider" id="rng-${c.id}" min="0" max="100" step="5" value="${currentPct}"
+          oninput="previewSlider('${c.id}', ${c.target}, this.value)"
+          onchange="autoSaveSlider('${c.id}', '${todayStr}', ${c.target}, this.value)" />
+      `;
     }
 
-    row.innerHTML = `
-      <div class="dash-top">
-        <div>
-          <div class="dash-title">${escapeHtml(c.title)}</div>
-          <div class="dash-sub">Day ${todaySlot.index} of ${c.totalDays} &bull; ${c.mode === 'binary' ? 'Binary' : `Target: ${c.target} ${escapeHtml(c.unit)}`}</div>
-        </div>
-        ${pillHtml}
-      </div>
-      ${actionHtml}
-    `;
     container.appendChild(row);
   });
 }
 
-/* TAB 2: 7-COLUMN MONTHLY CALENDAR TIMELINE */
-function buildMonthlyCalendarsHtml(c, stats) {
+/* TAB 2: COMPACT SINGLE-MONTH PAGINATED CALENDAR */
+function buildSingleMonthCalendarHtml(c, stats, todayStr) {
   if (!stats.slots.length) return '';
 
   const slotMap = new Map();
   stats.slots.forEach(s => slotMap.set(s.date, s));
 
-  // Determine active weekday columns (Monday=0 .. Sunday=6) to highlight headers
+  // Default displayed month to current month (or commitment start month if current is before start)
+  if (!calendarViewMonth.has(c.id)) {
+    const todayYm = todayStr.slice(0, 7);
+    const startYm = stats.slots[0].date.slice(0, 7);
+    const endYm = stats.slots[stats.slots.length - 1].date.slice(0, 7);
+    if (todayYm >= startYm && todayYm <= endYm) calendarViewMonth.set(c.id, todayYm);
+    else calendarViewMonth.set(c.id, startYm);
+  }
+
+  const activeYm = calendarViewMonth.get(c.id);
+  const [year, month] = activeYm.split('-').map(Number);
+
   const activeCols = new Set();
   if (c.freq === 'specific') {
     c.specificDays.forEach(jsDay => activeCols.add((Number(jsDay) + 6) % 7));
@@ -287,61 +296,46 @@ function buildMonthlyCalendarsHtml(c, stats) {
     weekdayLabels.map((lbl, idx) => `<span class="${activeCols.has(idx) ? 'wk-active' : ''}">${lbl}</span>`).join('')
   }</div>`;
 
-  // Collect all unique YYYY-MM months spanned by the commitment's slots
-  const monthKeys = [];
-  const seenMonths = new Set();
-  stats.slots.forEach(s => {
-    const ym = s.date.slice(0, 7);
-    if (!seenMonths.has(ym)) {
-      seenMonths.add(ym);
-      monthKeys.push(ym);
-    }
-  });
+  const firstOfMonth = new Date(year, month - 1, 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const startOffset = (firstOfMonth.getDay() + 6) % 7;
 
-  return monthKeys.map(ym => {
-    const [year, month] = ym.split('-').map(Number);
-    const firstOfMonth = new Date(year, month - 1, 1);
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const startOffset = (firstOfMonth.getDay() + 6) % 7; // Monday-first offset (0..6)
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) {
+    cells.push(`<div class="cal-cell blank"></div>`);
+  }
 
-    const cells = [];
-    // Leading blank padding cells
-    for (let i = 0; i < startOffset; i++) {
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const slot = slotMap.get(dateStr);
+
+    if (!slot) {
       cells.push(`<div class="cal-cell blank"></div>`);
+    } else {
+      const dd = String(day).padStart(2, '0');
+      const mmm = MONTHS_SHORT[month - 1];
+      cells.push(`
+        <div class="cal-cell ${slot.status}" title="${dateStr} (${slot.status})">
+          <span class="cal-dd">${dd}</span>
+          <span class="cal-mmm">${mmm}</span>
+        </div>`);
     }
+  }
 
-    // Calendar days 1..daysInMonth
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const slot = slotMap.get(dateStr);
+  while (cells.length % 7 !== 0) {
+    cells.push(`<div class="cal-cell blank"></div>`);
+  }
 
-      if (!slot) {
-        // Off-day / Unscheduled day -> completely blank/black cell
-        cells.push(`<div class="cal-cell blank"></div>`);
-      } else {
-        const dd = String(day).padStart(2, '0');
-        const mmm = MONTHS_SHORT[month - 1];
-        cells.push(`
-          <div class="cal-cell ${slot.status}" title="${dateStr} (${slot.status})">
-            <span class="cal-dd">${dd}</span>
-            <span class="cal-mmm">${mmm}</span>
-          </div>`);
-      }
-    }
-
-    // Trailing blank padding cells to complete the final 7-day row cleanly
-    while (cells.length % 7 !== 0) {
-      cells.push(`<div class="cal-cell blank"></div>`);
-    }
-
-    const monthTitle = `${MONTHS_SHORT[month - 1]} ${year}`;
-    return `
-      <div class="month-block">
-        <div class="month-title">${monthTitle}</div>
-        ${weekdayHeaderHtml}
-        <div class="cal-grid">${cells.join('')}</div>
-      </div>`;
-  }).join('');
+  const monthTitle = `${MONTHS_SHORT[month - 1]} ${year}`;
+  return `
+    <div class="cal-nav-bar">
+      <button type="button" class="cal-nav-btn" onclick="changeCalMonth('${c.id}', -1)">&larr; Prev</button>
+      <span class="month-title">${monthTitle}</span>
+      <button type="button" class="cal-nav-btn" onclick="changeCalMonth('${c.id}', 1)">Next &rarr;</button>
+    </div>
+    ${weekdayHeaderHtml}
+    <div class="cal-grid">${cells.join('')}</div>
+  `;
 }
 
 function renderTimeline(todayStr) {
@@ -360,7 +354,7 @@ function renderTimeline(todayStr) {
     const item = document.createElement('div');
     item.className = `acc-item ${isOpen ? 'open' : ''}`;
 
-    const calendarsHtml = buildMonthlyCalendarsHtml(c, stats);
+    const calendarHtml = buildSingleMonthCalendarHtml(c, stats, todayStr);
 
     item.innerHTML = `
       <button class="acc-header" onclick="toggleAccordion('${c.id}')">
@@ -372,13 +366,13 @@ function renderTimeline(todayStr) {
       </button>
       <div class="acc-body">
         <div class="cal-legend">
-          <span><i class="leg-dot" style="background:var(--green);"></i>Completed</span>
+          <span><i class="leg-dot" style="background:var(--green);"></i>Done</span>
           <span><i class="leg-dot" style="background:var(--yellow);"></i>Partial</span>
           <span><i class="leg-dot" style="background:var(--missed-gray);"></i>Missed</span>
           <span><i class="leg-dot" style="background:var(--future-bg);border:1px solid var(--future-border);"></i>Scheduled</span>
-          <span><i class="leg-dot" style="background:var(--blank-cell);border:1px solid var(--border);"></i>Off-day</span>
+          <span><i class="leg-dot" style="background:var(--blank-cell);border:1px solid var(--border);"></i>Off</span>
         </div>
-        ${calendarsHtml}
+        ${calendarHtml}
       </div>
     `;
     container.appendChild(item);
@@ -427,13 +421,18 @@ function renderAnalytics(todayStr) {
 }
 
 /* INTERACTIONS & 24H LOCK GUARD */
-window.logBinary = function(id, dateStr, value) {
+window.toggleBinaryCheckbox = function(id, dateStr, isChecked) {
   if (dateStr !== getLocalDateStr()) return alert('24h Lock: Past or future days cannot be edited.');
   const c = state.commitments.find(x => x.id === id);
   if (!c) return;
-  c.logs[dateStr] = value;
+  if (isChecked) {
+    c.logs[dateStr] = 1;
+  } else {
+    delete c.logs[dateStr];
+  }
   saveState();
-  renderAll();
+  renderTimeline(dateStr);
+  renderAnalytics(dateStr);
 };
 
 window.previewSlider = function(id, target, pctVal) {
@@ -443,15 +442,25 @@ window.previewSlider = function(id, target, pctVal) {
   document.getElementById(`lbl-unit-${id}`).textContent = units;
 };
 
-window.commitSlider = function(id, dateStr, target) {
+window.autoSaveSlider = function(id, dateStr, target, pctVal) {
   if (dateStr !== getLocalDateStr()) return alert('24h Lock: Past or future days cannot be edited.');
-  const pct = Number(document.getElementById(`rng-${id}`).value);
-  const units = Number(((pct / 100) * target).toFixed(2));
+  const pct = Number(pctVal);
   const c = state.commitments.find(x => x.id === id);
   if (!c) return;
-  c.logs[dateStr] = units;
+  if (pct === 0) {
+    delete c.logs[dateStr];
+  } else {
+    c.logs[dateStr] = Number(((pct / 100) * target).toFixed(2));
+  }
   saveState();
-  renderAll();
+  renderTimeline(dateStr);
+  renderAnalytics(dateStr);
+};
+
+window.changeCalMonth = function(id, delta) {
+  const currentYm = calendarViewMonth.get(id) || getLocalDateStr().slice(0, 7);
+  calendarViewMonth.set(id, shiftMonthStr(currentYm, delta));
+  renderTimeline(getLocalDateStr());
 };
 
 window.toggleAccordion = function(id) {
@@ -464,6 +473,7 @@ window.deleteCommitment = function(id) {
   if (!confirm('Delete this commitment and all its logged history?')) return;
   state.commitments = state.commitments.filter(x => x.id !== id);
   expandedAccordions.delete(id);
+  calendarViewMonth.delete(id);
   saveState();
   renderAll();
 };
@@ -577,54 +587,3 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-export-csv').onclick = () => {
-    const rows = [['commitment_id', 'title', 'mode', 'date', 'logged_value', 'target', 'threshold_pct']];
-    state.commitments.forEach(c => {
-      generateSlots(c).forEach(s => {
-        const val = c.logs[s.date] !== undefined ? c.logs[s.date] : '';
-        rows.push([c.id, `"${c.title.replace(/"/g, '""')}"`, c.mode, s.date, val, c.target || 1, c.threshold || 100]);
-      });
-    });
-    downloadFile(rows.map(r => r.join(',')).join('\n'), `ccc-tracker-${getLocalDateStr()}.csv`, 'text/csv');
-  };
-
-  document.getElementById('btn-export-json').onclick = () => {
-    downloadFile(JSON.stringify(state, null, 2), `ccc-backup-${getLocalDateStr()}.json`, 'application/json');
-  };
-
-  document.getElementById('input-import-json').onchange = e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const parsed = JSON.parse(ev.target.result);
-        if (!Array.isArray(parsed.commitments)) throw new Error('Invalid format');
-        state = parsed;
-        saveState();
-        renderAll();
-        alert('Backup restored.');
-      } catch {
-        alert('Invalid backup JSON file.');
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  }
-
-  updateCountdown();
-  setInterval(updateCountdown, 30000);
-  renderAll();
-});
-
-function downloadFile(content, filename, mimeType) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
