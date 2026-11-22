@@ -9,7 +9,7 @@ let calendarViewMonth = new Map();
 let lastRenderedDate = '';
 let editingCommitmentId = null;
 
-/* Theme Management (Daylight  / Nightlight) */
+/* Theme Management (Daylight / Nightlight) */
 function applyTheme(theme) {
   const mode = theme === 'light' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', mode);
@@ -282,10 +282,22 @@ function evaluateCommitment(c, todayStr) {
   };
 }
 
+function updateTodayLabel() {
+  const el = document.getElementById('today-label');
+  if (!el) return;
+
+  el.textContent = new Date().toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZoneName: 'short'
+  });
+}
+
 function renderAll() {
   const todayStr = getLocalDateStr();
   lastRenderedDate = todayStr;
-  document.getElementById('today-label').textContent = formatShortDate(todayStr);
+  updateTodayLabel();
 
   renderDashboard(todayStr);
   renderTimeline(todayStr);
@@ -508,50 +520,43 @@ function renderTimeline(todayStr) {
   });
 }
 
-/* TAB 3: ANALYTICS CARD (3-column aligned metrics, color tiers, highlighted R/P/M, hide 0d streak) */
+/* TAB 3: COMPACT 2-LINE ANALYTICS CARD WITH STATUS ICONS */
 function renderAnalyticsCardHtml(c, s, isCompletedView) {
   const editBtnHtml = isCompletedView
     ? `<span class="finished-tag">Completed</span>`
     : `<button class="btn-icon-action edit" title="Edit commitment" onclick="openEditCommitment('${c.id}')">&#9998;</button>`;
 
-  let compClass = 'comp-neutral';
-  if (s.elapsedCount > 0) {
-    if (s.compliancePct >= 80) compClass = 'comp-high';
-    else if (s.compliancePct >= 50) compClass = 'comp-mid';
-    else compClass = 'comp-low';
-  }
+  let compTierClass = 'tier-low';
+  if (s.compliancePct >= 70) compTierClass = 'tier-high';
+  else if (s.compliancePct >= 50) compTierClass = 'tier-mid';
 
   const streakHtml = s.currentStreak > 0
-    ? `<span class="ana-streak">&#128293; ${s.currentStreak}d</span>`
+    ? `<span class="ana-streak" title="Current streak">&#128293; ${s.currentStreak}d</span>`
     : '';
 
   return `
     <div class="ana-card ${isCompletedView ? 'completed-card' : ''}">
       <div class="ana-row-1">
-        <span class="ana-title">${escapeHtml(c.title)}</span>
+        <div class="ana-title-wrap">
+          <span class="ana-title">${escapeHtml(c.title)}</span>
+          ${streakHtml}
+        </div>
         <div class="ana-right-top">
           ${editBtnHtml}
           <button class="btn-icon-action del" title="Delete commitment" onclick="deleteCommitment('${c.id}')">&#128465;</button>
         </div>
       </div>
 
-      <div class="ana-row-2">
-        <span class="ana-completed-txt">${s.completedCount}/${s.totalScheduled} completed</span>
-        <span class="ana-compliance-mid">Compliance <strong class="${compClass}">${s.completedCount}/${s.elapsedCount} (${s.compliancePct}%)</strong></span>
-        <span class="ana-overall-txt">${s.completionPct}% overall</span>
+      <div class="ana-metrics-row">
+        <span class="ana-count">${s.completedCount}/${s.totalScheduled}</span>
+        <span class="ana-compliance ${compTierClass}">${s.completedCount}/${s.elapsedCount} (${s.compliancePct}%)</span>
+        <span class="ana-icon-stat stat-part" title="Partial">&#9680; ${s.partialCount}</span>
+        <span class="ana-icon-stat stat-miss" title="Missed">&#10005; ${s.missedCount}</span>
+        <span class="ana-overall">${s.completionPct}%</span>
       </div>
 
       <div class="ana-bar">
         <div class="ana-bar-fill" style="width:${s.completionPct}%"></div>
-      </div>
-
-      <div class="ana-row-3">
-        <span>
-          <span class="stat-rem">${s.remainingCount} remaining</span> &middot;
-          <span class="stat-part">${s.partialCount} partial</span> &middot;
-          <span class="stat-miss">${s.missedCount} missed</span>
-        </span>
-        ${streakHtml}
       </div>
     </div>
   `;
@@ -740,18 +745,6 @@ window.deleteCommitment = async function(id) {
 
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
-}
-
-function updateTodayLabel() {
-  const el = document.getElementById('today-label');
-  if (!el) return;
-
-  el.textContent = new Date().toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZoneName: 'short'
-  });
 }
 
 function updateCountdown() {
@@ -1061,77 +1054,3 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     downloadFile(rows.map(r => r.join(',')).join('\n'), `ccc-tracker-${getLocalDateStr()}.csv`, 'text/csv');
   };
-
-  document.getElementById('btn-export-json').onclick = () => {
-    downloadFile(JSON.stringify(state, null, 2), `ccc-backup-${getLocalDateStr()}.json`, 'application/json');
-  };
-
-  document.getElementById('input-import-json').onchange = e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const parsed = JSON.parse(ev.target.result);
-        if (!Array.isArray(parsed.commitments)) throw new Error('Invalid format');
-        parsed.commitments = parsed.commitments.map(normalizeCommitment);
-        state = parsed;
-        saveState();
-        renderAll();
-        alert('Backup restored.');
-      } catch {
-        alert('Invalid backup JSON file.');
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  }
-
-  initReminderUI();
-  initNativeLifecycle();
-  updateCountdown();
-  setInterval(updateCountdown, 30000);
-  renderAll();
-
-  // Auto-load saved backup without manual steps when local commitments list is empty
-  if (state.commitments.length === 0) {
-    restoreMirrorBackupFromAndroidDocuments();
-  }
-});
-
-async function downloadFile(content, filename, mimeType) {
-  try {
-    const cap = window.Capacitor;
-    if (cap && cap.isNativePlatform && cap.isNativePlatform()) {
-      const { Filesystem, Share } = cap.Plugins;
-      if (Filesystem && Share) {
-        const writeRes = await Filesystem.writeFile({
-          path: filename,
-          data: content,
-          directory: 'CACHE',
-          encoding: 'utf8'
-        });
-        await Share.share({
-          title: filename,
-          text: 'CCC Tracker Export',
-          url: writeRes.uri,
-          dialogTitle: 'Save to Google Drive or Local Storage'
-        });
-        return;
-      }
-    }
-  } catch (err) {
-    console.warn('Native share fallback:', err);
-  }
-
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
