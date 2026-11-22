@@ -13,6 +13,13 @@
   --green-text: #4ade80;
   --yellow: #eab308;
   --yellow-text: #0f172a;
+  /* Compliance tiers & status highlights for Dark theme */
+  --comp-high: #4ade80;
+  --comp-mid: #fda4af;
+  --comp-low: #f87171;
+  --stat-rem: #38bdf8;
+  --stat-part: #facc15;
+  --stat-miss: #f87171;
   --missed-gray: #4b5563;
   --blank-cell: #090b0e;
   --future-bg: #1e2433;
@@ -35,6 +42,13 @@
   --green-text: #15803d;
   --yellow: #eab308;
   --yellow-text: #0f172a;
+  /* Compliance tiers & status highlights for Light theme */
+  --comp-high: #15803d;
+  --comp-mid: #e11d48;
+  --comp-low: #b91c1c;
+  --stat-rem: #0284c7;
+  --stat-part: #b45309;
+  --stat-miss: #dc2626;
   --missed-gray: #9ca3af;
   --blank-cell: #e9eef5;
   --future-bg: #ffffff;
@@ -117,7 +131,7 @@ body {
 
 .list-stack { display: flex; flex-direction: column; gap: 10px; }
 
-/* TAB 1: MINIMALIST SKETCH-ALIGNED CARDS */
+/* TAB 1: DASHBOARD CARDS */
 .dash-item {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -209,7 +223,7 @@ body {
   display: block;
 }
 
-/* TAB 2: COMPACT SINGLE-MONTH BOUNDED CALENDAR */
+/* TAB 2: TIMELINE CALENDAR */
 .acc-item {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -316,7 +330,7 @@ body {
   background: var(--blank-cell);
 }
 
-/* Point 3: Clear underline on today's date even when today falls on an unscheduled off-day */
+/* Point 3: Underline today's date cell even on unscheduled off-days */
 .cal-cell.is-today-marker {
   border-bottom: 2.5px solid var(--accent);
   color: var(--text);
@@ -343,10 +357,11 @@ body {
 .cal-cell.today { background: var(--future-bg); border: 1.5px solid var(--accent); color: var(--text); }
 .cal-cell.future { background: var(--future-bg); border: 1px solid var(--future-border); color: var(--text); }
 
-/* TAB 3: COMPACT ANALYTICS CARDS & COMPLETED HISTORY */
+/* TAB 3: ANALYTICS CARDS WITH LEFT VERTICAL LINE & 3-COLUMN METRICS */
 .ana-card {
   background: var(--surface);
   border: 1px solid var(--border);
+  border-left: 3.5px solid var(--accent);
   border-radius: 12px;
   padding: 14px 16px;
   box-shadow: var(--shadow);
@@ -354,7 +369,10 @@ body {
 .ana-card.completed-card {
   opacity: 0.82;
   background: var(--surface-muted);
+  border-left-color: var(--muted);
 }
+
+/* Line 1: Commitment name on left, Edit & Delete actions on right */
 .ana-row-1 {
   display: flex;
   justify-content: space-between;
@@ -370,15 +388,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.ana-compliance {
-  font-size: 0.82rem;
-  color: var(--muted);
-  font-weight: 500;
-}
-.ana-compliance strong {
-  color: var(--green-text);
-  font-weight: 700;
+  flex-shrink: 0;
 }
 .finished-tag {
   font-size: 0.68rem;
@@ -400,21 +410,39 @@ body {
 .btn-icon-action.edit:hover { color: var(--accent); }
 .btn-icon-action.del:hover { color: #ef4444; }
 
+/* Line 2: 3-column grid keeps completed left, compliance centered, overall right */
 .ana-row-2 {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: baseline;
+  gap: 6px;
   margin-top: 12px;
 }
 .ana-completed-txt {
   font-size: 0.88rem;
   font-weight: 700;
   color: var(--text);
+  text-align: left;
+  white-space: nowrap;
 }
+.ana-compliance-mid {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+.ana-compliance-mid strong.comp-high { color: var(--comp-high); }
+.ana-compliance-mid strong.comp-mid { color: var(--comp-mid); }
+.ana-compliance-mid strong.comp-low { color: var(--comp-low); }
+.ana-compliance-mid strong.comp-neutral { color: var(--muted); }
+
 .ana-overall-txt {
   font-size: 0.8rem;
   color: var(--muted);
   font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .ana-bar {
@@ -431,6 +459,7 @@ body {
   transition: width 0.25s ease;
 }
 
+/* Line 3: Colored remaining, partial, missed counts + streak only when > 0 */
 .ana-row-3 {
   display: flex;
   justify-content: space-between;
@@ -438,12 +467,15 @@ body {
   font-size: 0.78rem;
   color: var(--muted);
 }
+.stat-rem { color: var(--stat-rem); font-weight: 600; }
+.stat-part { color: var(--stat-part); font-weight: 600; }
+.stat-miss { color: var(--stat-miss); font-weight: 600; }
 .ana-streak {
   font-weight: 700;
   color: var(--text);
 }
 
-/* Tab 4 Cards & Reminder Controls */
+/* TAB 4 CARDS & REMINDER CONTROLS */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -496,7 +528,7 @@ body {
 .about-title { font-size: 0.88rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
 .copyright { font-size: 0.76rem; font-weight: 600; color: var(--muted); margin-top: 10px; }
 
-/* Buttons & Nav */
+/* BUTTONS & NAV */
 button { cursor: pointer; font-weight: 600; border-radius: 8px; border: none; padding: 10px 14px; font-size: 0.86rem; }
 .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
 .btn-primary { background: var(--accent); color: var(--accent-text); }
@@ -522,7 +554,7 @@ button { cursor: pointer; font-weight: 600; border-radius: 8px; border: none; pa
 }
 .nav-btn.active { color: var(--accent); border-top: 2px solid var(--accent); }
 
-/* Modal */
+/* MODAL */
 .modal {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.75);
