@@ -104,6 +104,15 @@ body {
   margin-bottom: 12px;
 }
 .section-title { font-size: 0.94rem; font-weight: 700; color: var(--text); }
+.section-subhead {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 14px 0 8px;
+}
+.section-subhead:first-child { margin-top: 0; }
 .muted-sm { font-size: 0.75rem; color: var(--muted); }
 
 .list-stack { display: flex; flex-direction: column; gap: 10px; }
@@ -200,7 +209,7 @@ body {
   display: block;
 }
 
-/* TAB 2: COMPACT SINGLE-MONTH PAGINATED CALENDAR */
+/* TAB 2: COMPACT SINGLE-MONTH BOUNDED CALENDAR */
 .acc-item {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -292,7 +301,6 @@ body {
   gap: 3px;
 }
 
-/* Ultra-Compact Fixed-Height Day Cell */
 .cal-cell {
   height: 28px;
   border-radius: 5px;
@@ -306,6 +314,15 @@ body {
 
 .cal-cell.blank {
   background: var(--blank-cell);
+}
+
+/* Point 3: Clear underline on today's date even when today falls on an unscheduled off-day */
+.cal-cell.is-today-marker {
+  border-bottom: 2.5px solid var(--accent);
+  color: var(--text);
+}
+.cal-cell.blank.is-today-marker {
+  background: var(--surface-alt);
 }
 
 .cal-dd {
@@ -326,13 +343,17 @@ body {
 .cal-cell.today { background: var(--future-bg); border: 1.5px solid var(--accent); color: var(--text); }
 .cal-cell.future { background: var(--future-bg); border: 1px solid var(--future-border); color: var(--text); }
 
-/* TAB 3: COMPACT ANALYTICS CARDS (MATCHING REFERENCE) */
+/* TAB 3: COMPACT ANALYTICS CARDS & COMPLETED HISTORY */
 .ana-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px 16px;
   box-shadow: var(--shadow);
+}
+.ana-card.completed-card {
+  opacity: 0.82;
+  background: var(--surface-muted);
 }
 .ana-row-1 {
   display: flex;
@@ -348,7 +369,7 @@ body {
 .ana-right-top {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .ana-compliance {
   font-size: 0.82rem;
@@ -359,7 +380,16 @@ body {
   color: var(--green-text);
   font-weight: 700;
 }
-.btn-del-icon {
+.finished-tag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: var(--surface-alt);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.btn-icon-action {
   background: transparent;
   color: var(--muted);
   padding: 2px 5px;
@@ -367,9 +397,8 @@ body {
   border-radius: 5px;
   line-height: 1;
 }
-.btn-del-icon:hover {
-  color: #ef4444;
-}
+.btn-icon-action.edit:hover { color: var(--accent); }
+.btn-icon-action.del:hover { color: #ef4444; }
 
 .ana-row-2 {
   display: flex;
@@ -414,7 +443,7 @@ body {
   color: var(--text);
 }
 
-/* Tab 4 Cards */
+/* Tab 4 Cards & Reminder Controls */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -423,6 +452,29 @@ body {
   box-shadow: var(--shadow);
 }
 .card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+
+.reminder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.reminder-row input[type="time"] {
+  width: auto;
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.reminder-status {
+  margin-top: 8px;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
 
 .share-url-box {
   background: var(--surface-alt);
@@ -450,6 +502,7 @@ button { cursor: pointer; font-weight: 600; border-radius: 8px; border: none; pa
 .btn-primary { background: var(--accent); color: var(--accent-text); }
 .btn-secondary { background: var(--surface-alt); color: var(--text); border: 1px solid var(--border); }
 .btn-group { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.hidden { display: none !important; }
 
 .bottom-nav {
   position: fixed;
@@ -488,12 +541,29 @@ button { cursor: pointer; font-weight: 600; border-radius: 8px; border: none; pa
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .btn-icon { background: transparent; color: var(--muted); font-size: 1.4rem; padding: 0 6px; }
 
+.fixed-start-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  margin-bottom: 12px;
+}
+
 form label { display: block; font-size: 0.82rem; color: var(--muted); margin-bottom: 12px; }
-form input[type="text"], form input[type="number"], form input[type="date"], form select {
+form input[type="text"], form input[type="number"], form input[type="date"], form input[type="time"], form select {
   width: 100%; margin-top: 4px; padding: 9px 10px;
   border-radius: 8px; border: 1px solid var(--border);
   background: var(--bg); color: var(--text); font-size: 0.9rem;
 }
+form input:disabled, form select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .sub-box { background: var(--surface-alt); padding: 10px; border-radius: 8px; margin-bottom: 12px; }
 .sub-box.hidden { display: none; }
