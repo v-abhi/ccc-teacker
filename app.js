@@ -1054,3 +1054,76 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     downloadFile(rows.map(r => r.join(',')).join('\n'), `ccc-tracker-${getLocalDateStr()}.csv`, 'text/csv');
   };
+
+  document.getElementById('btn-export-json').onclick = () => {
+    downloadFile(JSON.stringify(state, null, 2), `ccc-backup-${getLocalDateStr()}.json`, 'application/json');
+  };
+
+  document.getElementById('input-import-json').onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!Array.isArray(parsed.commitments)) throw new Error('Invalid format');
+        parsed.commitments = parsed.commitments.map(normalizeCommitment);
+        state = parsed;
+        saveState();
+        renderAll();
+        alert('Backup restored.');
+      } catch {
+        alert('Invalid backup JSON file.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+
+  initReminderUI();
+  initNativeLifecycle();
+  updateCountdown();
+  setInterval(updateCountdown, 30000);
+  renderAll();
+
+  if (state.commitments.length === 0) {
+    restoreMirrorBackupFromAndroidDocuments();
+  }
+});
+
+async function downloadFile(content, filename, mimeType) {
+  try {
+    const cap = window.Capacitor;
+    if (cap && cap.isNativePlatform && cap.isNativePlatform()) {
+      const { Filesystem, Share } = cap.Plugins;
+      if (Filesystem && Share) {
+        const writeRes = await Filesystem.writeFile({
+          path: filename,
+          data: content,
+          directory: 'CACHE',
+          encoding: 'utf8'
+        });
+        await Share.share({
+          title: filename,
+          text: 'CCC Tracker Export',
+          url: writeRes.uri,
+          dialogTitle: 'Save to Google Drive or Local Storage'
+        });
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn('Native share fallback:', err);
+  }
+
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
