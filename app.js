@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'ccc_tracker_v2';
+const STORAGE_KEY = 'ccc_tracker_v3';
 const THEME_KEY = 'ccc_tracker_theme';
 const REMINDER_KEY = 'ccc_tracker_reminder';
 const APP_PUBLIC_URL = 'https://v-abhi.github.io/ccc-teacker/';
@@ -7,6 +7,7 @@ const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 let expandedAccordions = new Set();
 let calendarViewMonth = new Map();
 let lastRenderedDate = '';
+let editingCommitmentId = null; // Null when creating new; holds commitment id when editing an active commitment
 
 /* Theme Management (Daylight / Nightlight) */
 function applyTheme(theme) {
@@ -44,12 +45,44 @@ function shiftMonthStr(ymStr, delta) {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/* Point 6: Normalize legacy commitments into versioned forward-only rules so past dates stay immutable */
+function normalizeCommitment(c) {
+  if (!Array.isArray(c.rules) || c.rules.length === 0) {
+    c.rules = [{
+      effectiveFrom: c.startDate,
+      freq: c.freq || 'daily',
+      specificDays: Array.isArray(c.specificDays) ? c.specificDays : [1, 2, 3, 4, 5],
+      rollingTarget: c.rollingTarget || 3,
+      target: c.target || 20,
+      threshold: c.threshold || 80
+    }];
+  }
+  if (!c.logs) c.logs = {};
+  if (c.reminderTime === undefined) c.reminderTime = '';
+  return c;
+}
+
+function getRuleForDate(c, dateStr) {
+  normalizeCommitment(c);
+  let active = c.rules[0];
+  for (const r of c.rules) {
+    if (r.effectiveFrom <= dateStr) {
+      active = r;
+    } else {
+      break;
+    }
+  }
+  return active;
+}
+
 let state = loadState();
 
 function loadState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('ccc_tracker_v1');
-    return raw ? JSON.parse(raw) : { commitments: [] };
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('ccc_tracker_v2') || localStorage.getItem('ccc_tracker_v1');
+    const parsed = raw ? JSON.parse(raw) : { commitments: [] };
+    parsed.commitments = (parsed.commitments || []).map(normalizeCommitment);
+    return parsed;
   } catch {
     return { commitments: [] };
   }
@@ -77,26 +110,37 @@ async function mirrorBackupToAndroidDocuments() {
   } catch {}
 }
 
+/* Point 6: Generate scheduled slots using whichever rule applies on each cursor date */
 function generateSlots(c) {
+  normalizeCommitment(c);
   const slots = [];
   let cursor = parseLocalDate(c.startDate);
+  let safety = 0;
 
-  if (c.freq === 'daily' || c.freq === 'rolling') {
-    for (let i = 0; i < c.totalDays; i++) {
-      slots.push({ index: i + 1, date: getLocalDateStr(cursor) });
-      cursor.setDate(cursor.getDate() + 1);
+  while (slots.length < c.totalDays && safety < 2500) {
+    const dateStr = getLocalDateStr(cursor);
+    const rule = getRuleForDate(c, dateStr);
+    const dayOfWeek = cursor.getDay();
+
+    let isScheduledDay = false;
+    if (rule.freq === 'daily' || rule.freq === 'rolling') {
+      isScheduledDay = true;
+    } else if (rule.freq === 'specific') {
+      isScheduledDay = rule.specificDays.map(Number).includes(dayOfWeek);
     }
-  } else if (c.freq === 'specific') {
-    const allowed = new Set(c.specificDays.map(Number));
-    let safety = 0;
-    while (slots.length < c.totalDays && safety < 2000) {
-      if (allowed.has(cursor.getDay())) {
-        slots.push({ index: slots.length + 1, date: getLocalDateStr(cursor) });
-      }
-      cursor.setDate(cursor.getDate() + 1);
-      safety++;
+
+    if (isScheduledDay) {
+      slots.push({
+        index: slots.length + 1,
+        date: dateStr,
+        rule
+      });
     }
+
+    cursor.setDate(cursor.getDate() + 1);
+    safety++;
   }
+
   return slots;
 }
 
@@ -116,6 +160,7 @@ function evaluateCommitment(c, todayStr) {
     const isPast = slot.date < todayStr;
     const isToday = slot.date === todayStr;
     const isFuture = slot.date > todayStr;
+    const rule = slot.rule;
 
     let status = 'future';
     let score = 0;
@@ -131,9 +176,9 @@ function evaluateCommitment(c, todayStr) {
           pct = score * 100;
           isCompliant = score === 1;
         } else {
-          pct = Math.min(100, Math.round((rawVal / c.target) * 100));
+          pct = Math.min(100, Math.round((rawVal / rule.target) * 100));
           score = pct / 100;
-          isCompliant = pct >= c.threshold;
+          isCompliant = pct >= rule.threshold;
         }
       }
 
@@ -181,14 +226,17 @@ function evaluateCommitment(c, todayStr) {
     return { ...slot, rawVal, pct, status, isToday, isPast, isFuture };
   });
 
+  const latestRule = getRuleForDate(c, todayStr);
   let compliancePct = elapsedCount > 0 ? Math.round((completedCount / elapsedCount) * 100) : 100;
-  if (c.freq === 'rolling' && elapsedCount > 0) {
+  if (latestRule.freq === 'rolling' && elapsedCount > 0) {
     const weeksElapsed = Math.ceil(elapsedCount / 7);
-    const expectedToDate = Math.min(elapsedCount, weeksElapsed * c.rollingTarget);
+    const expectedToDate = Math.min(elapsedCount, weeksElapsed * latestRule.rollingTarget);
     compliancePct = expectedToDate > 0 ? Math.min(100, Math.round((completedCount / expectedToDate) * 100)) : 100;
   }
 
   const completionPct = Math.round((totalScoreSum / c.totalDays) * 100);
+  const lastSlotDate = slots.length ? slots[slots.length - 1].date : c.startDate;
+  const isCompleted = lastSlotDate < todayStr; // Point 4 & 5: Commitment window has ended before today
 
   return {
     slots: enrichedSlots,
@@ -200,7 +248,9 @@ function evaluateCommitment(c, todayStr) {
     compliancePct,
     completionPct,
     currentStreak,
-    longestStreak
+    longestStreak,
+    isCompleted,
+    latestRule
   };
 }
 
@@ -214,30 +264,28 @@ function renderAll() {
   renderAnalytics(todayStr);
 }
 
-/* Automatically re-render if calendar day changed while app was backgrounded */
 function syncDateIfRolledOver() {
   const currentToday = getLocalDateStr();
   if (lastRenderedDate && currentToday !== lastRenderedDate) {
-    const startInput = document.getElementById('cfg-start');
-    if (startInput && startInput.value === lastRenderedDate) {
-      startInput.value = currentToday;
-    }
     renderAll();
   }
 }
 
-/* TAB 1: DASHBOARD */
+/* TAB 1: DASHBOARD (Point 4: Automatically hides finished commitments whose schedule window has ended) */
 function renderDashboard(todayStr) {
   const container = document.getElementById('dashboard-list');
   container.innerHTML = '';
 
-  if (state.commitments.length === 0) {
-    container.innerHTML = `<div class="card"><p class="muted">No commitments configured yet. Tap "+ New" above to create your first tracked block.</p></div>`;
+  const ongoingCommitments = state.commitments
+    .map(c => ({ c, stats: evaluateCommitment(c, todayStr) }))
+    .filter(({ stats }) => !stats.isCompleted);
+
+  if (ongoingCommitments.length === 0) {
+    container.innerHTML = `<div class="card"><p class="muted">No active commitments. Tap "+ New" to start a new commitment.</p></div>`;
     return;
   }
 
-  const items = state.commitments.map(c => {
-    const stats = evaluateCommitment(c, todayStr);
+  const items = ongoingCommitments.map(({ c, stats }) => {
     const todaySlot = stats.slots.find(s => s.isToday);
     return { c, stats, todaySlot, isActiveToday: Boolean(todaySlot) };
   }).sort((a, b) => Number(b.isActiveToday) - Number(a.isActiveToday));
@@ -259,6 +307,7 @@ function renderDashboard(todayStr) {
     }
 
     const loggedVal = c.logs[todayStr];
+    const activeRule = todaySlot.rule;
 
     if (c.mode === 'binary') {
       const isChecked = loggedVal === 1;
@@ -275,7 +324,7 @@ function renderDashboard(todayStr) {
         </div>`;
     } else {
       const currentUnits = (loggedVal !== undefined && loggedVal !== null) ? loggedVal : 0;
-      const currentPct = Math.min(100, Math.round((currentUnits / c.target) * 100));
+      const currentPct = Math.min(100, Math.round((currentUnits / activeRule.target) * 100));
 
       row.innerHTML = `
         <div class="spec-top">
@@ -283,14 +332,14 @@ function renderDashboard(todayStr) {
             <div class="dash-title">${escapeHtml(c.title)}</div>
             <div class="dash-sub">D${todaySlot.index} of ${c.totalDays} &bull; Spectrum</div>
           </div>
-          <span class="spec-min">Min: ${c.threshold}%</span>
+          <span class="spec-min">Min: ${activeRule.threshold}%</span>
         </div>
         <div class="spec-progress-line">
-          Progress: <strong id="lbl-pct-${c.id}">${currentPct}%</strong> &bull; <span id="lbl-unit-${c.id}">${currentUnits}</span>/${c.target} ${escapeHtml(c.unit)}
+          Progress: <strong id="lbl-pct-${c.id}">${currentPct}%</strong> &bull; <span id="lbl-unit-${c.id}">${currentUnits}</span>/${activeRule.target} ${escapeHtml(c.unit)}
         </div>
         <input type="range" class="spec-slider" id="rng-${c.id}" min="0" max="100" step="5" value="${currentPct}"
-          oninput="previewSlider('${c.id}', ${c.target}, this.value)"
-          onchange="autoSaveSlider('${c.id}', '${todayStr}', ${c.target}, this.value)" />
+          oninput="previewSlider('${c.id}', ${activeRule.target}, this.value)"
+          onchange="autoSaveSlider('${c.id}', '${todayStr}', ${activeRule.target}, this.value)" />
       `;
     }
 
@@ -298,7 +347,7 @@ function renderDashboard(todayStr) {
   });
 }
 
-/* TAB 2: COMPACT SINGLE-MONTH BOUNDED CALENDAR */
+/* TAB 2: SINGLE-MONTH BOUNDED CALENDAR (Point 3: Today cell always underlined even on off-days) */
 function buildSingleMonthCalendarHtml(c, stats, todayStr) {
   if (!stats.slots.length) return '';
 
@@ -325,8 +374,10 @@ function buildSingleMonthCalendarHtml(c, stats, todayStr) {
   const [year, month] = activeYm.split('-').map(Number);
 
   const activeCols = new Set();
-  if (c.freq === 'specific') {
-    c.specificDays.forEach(jsDay => activeCols.add((Number(jsDay) + 6) % 7));
+  const sampleDateInMonth = `${activeYm}-15`;
+  const viewRule = getRuleForDate(c, sampleDateInMonth);
+  if (viewRule.freq === 'specific') {
+    viewRule.specificDays.forEach(jsDay => activeCols.add((Number(jsDay) + 6) % 7));
   } else {
     [0, 1, 2, 3, 4, 5, 6].forEach(col => activeCols.add(col));
   }
@@ -348,14 +399,25 @@ function buildSingleMonthCalendarHtml(c, stats, todayStr) {
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const slot = slotMap.get(dateStr);
+    const isTodayDate = dateStr === todayStr;
+    const todayUnderlineClass = isTodayDate ? ' is-today-marker' : '';
+    const dd = String(day).padStart(2, '0');
+    const mmm = MONTHS_SHORT[month - 1];
 
     if (!slot) {
-      cells.push(`<div class="cal-cell blank"></div>`);
+      // Show today's date with underline even on an unscheduled off-day; keep other off-days blank
+      if (isTodayDate) {
+        cells.push(`
+          <div class="cal-cell blank${todayUnderlineClass}" title="${dateStr} (Today - Off-day)">
+            <span class="cal-dd">${dd}</span>
+            <span class="cal-mmm">${mmm}</span>
+          </div>`);
+      } else {
+        cells.push(`<div class="cal-cell blank"></div>`);
+      }
     } else {
-      const dd = String(day).padStart(2, '0');
-      const mmm = MONTHS_SHORT[month - 1];
       cells.push(`
-        <div class="cal-cell ${slot.status}" title="${dateStr} (${slot.status})">
+        <div class="cal-cell ${slot.status}${todayUnderlineClass}" title="${dateStr} (${slot.status})">
           <span class="cal-dd">${dd}</span>
           <span class="cal-mmm">${mmm}</span>
         </div>`);
@@ -419,27 +481,20 @@ function renderTimeline(todayStr) {
   });
 }
 
-/* TAB 3: COMPACT ANALYTICS BREAKDOWN */
-function renderAnalytics(todayStr) {
-  const container = document.getElementById('analytics-list');
-  container.innerHTML = '';
+/* TAB 3: ANALYTICS (Point 5: Active vs Completed split + Point 6: Edit button on active items) */
+function renderAnalyticsCardHtml(c, s, isCompletedView) {
+  const editBtnHtml = isCompletedView
+    ? `<span class="finished-tag">Completed</span>`
+    : `<button class="btn-icon-action edit" title="Edit commitment" onclick="openEditCommitment('${c.id}')">&#9998;</button>`;
 
-  if (state.commitments.length === 0) {
-    container.innerHTML = `<div class="card"><p class="muted">No analytics available yet.</p></div>`;
-    return;
-  }
-
-  state.commitments.forEach(c => {
-    const s = evaluateCommitment(c, todayStr);
-    const card = document.createElement('div');
-    card.className = 'ana-card';
-
-    card.innerHTML = `
+  return `
+    <div class="ana-card ${isCompletedView ? 'completed-card' : ''}">
       <div class="ana-row-1">
         <span class="ana-title">${escapeHtml(c.title)}</span>
         <div class="ana-right-top">
           <span class="ana-compliance">Compliance <strong>${s.compliancePct}%</strong></span>
-          <button class="btn-del-icon" title="Delete commitment" onclick="deleteCommitment('${c.id}')">&#128465;</button>
+          ${editBtnHtml}
+          <button class="btn-icon-action del" title="Delete commitment" onclick="deleteCommitment('${c.id}')">&#128465;</button>
         </div>
       </div>
 
@@ -456,9 +511,47 @@ function renderAnalytics(todayStr) {
         <span>${s.remainingCount} remaining &middot; ${s.missedCount} missed &middot; ${s.partialCount} partial</span>
         <span class="ana-streak">&#128293; ${s.currentStreak}d</span>
       </div>
-    `;
-    container.appendChild(card);
+    </div>
+  `;
+}
+
+function renderAnalytics(todayStr) {
+  const container = document.getElementById('analytics-list');
+  container.innerHTML = '';
+
+  if (state.commitments.length === 0) {
+    container.innerHTML = `<div class="card"><p class="muted">No analytics available yet.</p></div>`;
+    return;
+  }
+
+  const activeItems = [];
+  const completedItems = [];
+
+  state.commitments.forEach(c => {
+    const s = evaluateCommitment(c, todayStr);
+    if (s.isCompleted) completedItems.push({ c, s });
+    else activeItems.push({ c, s });
   });
+
+  if (activeItems.length > 0) {
+    container.innerHTML += `<div class="section-subhead">Active Commitments (${activeItems.length})</div>`;
+    const activeStack = document.createElement('div');
+    activeStack.className = 'list-stack';
+    activeItems.forEach(({ c, s }) => {
+      activeStack.innerHTML += renderAnalyticsCardHtml(c, s, false);
+    });
+    container.appendChild(activeStack);
+  }
+
+  if (completedItems.length > 0) {
+    container.innerHTML += `<div class="section-subhead">Completed Commitments (${completedItems.length})</div>`;
+    const doneStack = document.createElement('div');
+    doneStack.className = 'list-stack';
+    completedItems.forEach(({ c, s }) => {
+      doneStack.innerHTML += renderAnalyticsCardHtml(c, s, true);
+    });
+    container.appendChild(doneStack);
+  }
 }
 
 /* INTERACTIONS & 24H LOCK GUARD */
@@ -526,11 +619,79 @@ window.toggleAccordion = function(id) {
   renderTimeline(getLocalDateStr());
 };
 
-window.deleteCommitment = function(id) {
+/* Point 6: Open modal in Edit mode locking Title, Mode, and Unit while allowing forward schedule/target/reminder updates */
+window.openEditCommitment = function(id) {
+  const c = state.commitments.find(x => x.id === id);
+  if (!c) return;
+  normalizeCommitment(c);
+
+  const todayStr = getLocalDateStr();
+  const activeRule = getRuleForDate(c, todayStr);
+
+  editingCommitmentId = id;
+  document.getElementById('modal-heading').textContent = 'Edit Commitment (From Today)';
+  document.getElementById('btn-submit-commitment').textContent = 'Save Changes';
+  document.getElementById('cfg-start-label').textContent = `Started ${formatShortDate(c.startDate)}`;
+
+  const titleEl = document.getElementById('cfg-title');
+  titleEl.value = c.title;
+  titleEl.disabled = true; // Title cannot be modified during edit
+
+  document.getElementById('cfg-days').value = c.totalDays;
+  document.getElementById('cfg-item-reminder').value = c.reminderTime || '';
+
+  const freqEl = document.getElementById('cfg-freq');
+  freqEl.value = activeRule.freq;
+  document.getElementById('box-specific-days').classList.toggle('hidden', activeRule.freq !== 'specific');
+  document.getElementById('box-rolling-days').classList.toggle('hidden', activeRule.freq !== 'rolling');
+
+  const allowedSet = new Set((activeRule.specificDays || []).map(Number));
+  document.querySelectorAll('#box-specific-days input').forEach(cb => {
+    cb.checked = allowedSet.has(Number(cb.value));
+  });
+  document.getElementById('cfg-rolling-target').value = activeRule.rollingTarget || 3;
+
+  const modeEl = document.getElementById('cfg-mode');
+  modeEl.value = c.mode;
+  modeEl.disabled = true; // Mode cannot be changed during edit
+
+  const targetEl = document.getElementById('cfg-target');
+  const unitEl = document.getElementById('cfg-unit');
+  const threshEl = document.getElementById('cfg-threshold');
+
+  document.getElementById('box-spectrum').classList.toggle('hidden', c.mode !== 'spectrum');
+  targetEl.value = activeRule.target;
+  unitEl.value = c.unit || 'units';
+  unitEl.disabled = true; // Unit label cannot be changed during edit
+  threshEl.value = activeRule.threshold;
+  document.getElementById('thresh-val').textContent = activeRule.threshold;
+
+  document.getElementById('modal-new').classList.remove('hidden');
+};
+
+function resetModalToCreateMode() {
+  editingCommitmentId = null;
+  const todayStr = getLocalDateStr();
+  document.getElementById('modal-heading').textContent = 'New Commitment';
+  document.getElementById('btn-submit-commitment').textContent = 'Create';
+  document.getElementById('cfg-start-label').textContent = `Today (${formatShortDate(todayStr)})`;
+
+  document.getElementById('form-commitment').reset();
+  document.getElementById('cfg-title').disabled = false;
+  document.getElementById('cfg-mode').disabled = false;
+  document.getElementById('cfg-unit').disabled = false;
+  document.getElementById('thresh-val').textContent = '80';
+  document.getElementById('box-specific-days').classList.add('hidden');
+  document.getElementById('box-rolling-days').classList.add('hidden');
+  document.getElementById('box-spectrum').classList.add('hidden');
+}
+
+window.deleteCommitment = async function(id) {
   if (!confirm('Delete this commitment and all its logged history?')) return;
   state.commitments = state.commitments.filter(x => x.id !== id);
   expandedAccordions.delete(id);
   calendarViewMonth.delete(id);
+  await cancelItemReminder(id);
   saveState();
   renderAll();
 };
@@ -549,7 +710,47 @@ function updateCountdown() {
   document.getElementById('countdown-badge').textContent = `Lock in ${hrs}h ${mins}m`;
 }
 
-/* Native Daily Notification Scheduler */
+/* Point 2: Per-commitment notification ID derived deterministically from commitment id */
+function getItemNotificationId(commitmentId) {
+  let hash = 2000;
+  for (let i = 0; i < commitmentId.length; i++) {
+    hash = ((hash << 5) - hash + commitmentId.charCodeAt(i)) | 0;
+  }
+  return 2000 + (Math.abs(hash) % 900000);
+}
+
+async function cancelItemReminder(commitmentId) {
+  const cap = window.Capacitor;
+  if (!cap || !cap.isNativePlatform || !cap.isNativePlatform() || !cap.Plugins?.LocalNotifications) return;
+  await cap.Plugins.LocalNotifications.cancel({
+    notifications: [{ id: getItemNotificationId(commitmentId) }]
+  }).catch(() => {});
+}
+
+async function syncItemReminder(commitment) {
+  const cap = window.Capacitor;
+  if (!cap || !cap.isNativePlatform || !cap.isNativePlatform() || !cap.Plugins?.LocalNotifications) return;
+  const { LocalNotifications } = cap.Plugins;
+  const notifId = getItemNotificationId(commitment.id);
+
+  await LocalNotifications.cancel({ notifications: [{ id: notifId }] }).catch(() => {});
+  if (!commitment.reminderTime) return;
+
+  const perm = await LocalNotifications.requestPermissions();
+  if (perm.display !== 'granted') return;
+
+  const [hour, minute] = commitment.reminderTime.split(':').map(Number);
+  await LocalNotifications.schedule({
+    notifications: [{
+      id: notifId,
+      title: `CCC Tracker: ${commitment.title}`,
+      body: 'Daily reminder to log this commitment.',
+      schedule: { on: { hour, minute }, repeats: true }
+    }]
+  });
+}
+
+/* Global Daily Check-In Reminder in Tab 4 */
 async function configureDailyReminder(timeStr, enable) {
   const statusEl = document.getElementById('reminder-status');
   const disableBtn = document.getElementById('btn-disable-reminder');
@@ -579,14 +780,12 @@ async function configureDailyReminder(timeStr, enable) {
   const [hour, minute] = timeStr.split(':').map(Number);
   await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
   await LocalNotifications.schedule({
-    notifications: [
-      {
-        id: 1001,
-        title: 'CCC Tracker: Daily Check-In',
-        body: 'Log today’s open commitments before the midnight lock.',
-        schedule: { on: { hour, minute }, repeats: true }
-      }
-    ]
+    notifications: [{
+      id: 1001,
+      title: 'CCC Tracker: Daily Check-In',
+      body: 'Log today’s open commitments before the midnight lock.',
+      schedule: { on: { hour, minute }, repeats: true }
+    }]
   });
 
   localStorage.setItem(REMINDER_KEY, timeStr);
@@ -615,7 +814,6 @@ function initReminderUI() {
   });
 }
 
-/* Native App Lifecycle (Resume Refresh + Back Button) */
 function initNativeLifecycle() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) syncDateIfRolledOver();
@@ -633,6 +831,7 @@ function initNativeLifecycle() {
       const modal = document.getElementById('modal-new');
       if (modal && !modal.classList.contains('hidden')) {
         modal.classList.add('hidden');
+        resetModalToCreateMode();
         return;
       }
       const activeNav = document.querySelector('.nav-btn.active');
@@ -653,7 +852,8 @@ document.addEventListener('DOMContentLoaded', () => {
     applyTheme(current === 'dark' ? 'light' : 'dark');
   };
 
-  document.getElementById('cfg-start').value = getLocalDateStr();
+  const todayStr = getLocalDateStr();
+  document.getElementById('cfg-start-label').textContent = `Today (${formatShortDate(todayStr)})`;
 
   const shareUrl = window.location.protocol.startsWith('http') ? window.location.href.split('#')[0] : APP_PUBLIC_URL;
   document.getElementById('app-url-display').textContent = shareUrl;
@@ -688,9 +888,18 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   const modal = document.getElementById('modal-new');
-  document.getElementById('btn-open-modal').onclick = () => modal.classList.remove('hidden');
-  document.getElementById('btn-close-modal').onclick = () => modal.classList.add('hidden');
-  document.getElementById('btn-cancel-modal').onclick = () => modal.classList.add('hidden');
+  document.getElementById('btn-open-modal').onclick = () => {
+    resetModalToCreateMode();
+    modal.classList.remove('hidden');
+  };
+  document.getElementById('btn-close-modal').onclick = () => {
+    modal.classList.add('hidden');
+    resetModalToCreateMode();
+  };
+  document.getElementById('btn-cancel-modal').onclick = () => {
+    modal.classList.add('hidden');
+    resetModalToCreateMode();
+  };
 
   document.getElementById('cfg-freq').addEventListener('change', e => {
     document.getElementById('box-specific-days').classList.toggle('hidden', e.target.value !== 'specific');
@@ -705,47 +914,90 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('thresh-val').textContent = e.target.value;
   });
 
-  document.getElementById('form-commitment').addEventListener('submit', e => {
+  document.getElementById('form-commitment').addEventListener('submit', async e => {
     e.preventDefault();
+    const nowDateStr = getLocalDateStr();
     const freq = document.getElementById('cfg-freq').value;
     const specificDays = Array.from(document.querySelectorAll('#box-specific-days input:checked')).map(cb => Number(cb.value));
+    const rollingTarget = parseInt(document.getElementById('cfg-rolling-target').value, 10) || 3;
+    const target = parseFloat(document.getElementById('cfg-target').value) || 20;
+    const threshold = parseInt(document.getElementById('cfg-threshold').value, 10) || 80;
+    const reminderTime = document.getElementById('cfg-item-reminder').value || '';
+    const requestedDays = parseInt(document.getElementById('cfg-days').value, 10);
 
     if (freq === 'specific' && specificDays.length === 0) {
       return alert('Select at least one day of the week.');
     }
 
-    const newCommitment = {
-      id: 'c_' + Date.now(),
-      title: document.getElementById('cfg-title').value.trim(),
-      startDate: document.getElementById('cfg-start').value,
-      totalDays: parseInt(document.getElementById('cfg-days').value, 10),
-      freq,
-      specificDays,
-      rollingTarget: parseInt(document.getElementById('cfg-rolling-target').value, 10),
-      mode: document.getElementById('cfg-mode').value,
-      target: parseFloat(document.getElementById('cfg-target').value),
-      unit: document.getElementById('cfg-unit').value.trim() || 'units',
-      threshold: parseInt(document.getElementById('cfg-threshold').value, 10),
-      logs: {}
-    };
+    if (editingCommitmentId) {
+      // Point 6: Update active commitment forward from today without altering locked past dates
+      const existing = state.commitments.find(x => x.id === editingCommitmentId);
+      if (existing) {
+        normalizeCommitment(existing);
+        const currentStats = evaluateCommitment(existing, nowDateStr);
+        const minAllowedDays = Math.max(1, currentStats.completedCount + currentStats.partialCount + currentStats.missedCount);
+        if (requestedDays < minAllowedDays) {
+          return alert(`Total days cannot be less than ${minAllowedDays} already-elapsed days.`);
+        }
 
-    state.commitments.push(newCommitment);
+        existing.totalDays = requestedDays;
+        existing.reminderTime = reminderTime;
+
+        const newRule = {
+          effectiveFrom: nowDateStr,
+          freq,
+          specificDays,
+          rollingTarget,
+          target,
+          threshold
+        };
+        existing.rules = existing.rules.filter(r => r.effectiveFrom < nowDateStr);
+        existing.rules.push(newRule);
+
+        await syncItemReminder(existing);
+      }
+    } else {
+      // Point 1: Fixed start date set to today automatically
+      const newCommitment = normalizeCommitment({
+        id: 'c_' + Date.now(),
+        title: document.getElementById('cfg-title').value.trim(),
+        startDate: nowDateStr,
+        totalDays: requestedDays,
+        freq,
+        specificDays,
+        rollingTarget,
+        mode: document.getElementById('cfg-mode').value,
+        target,
+        unit: document.getElementById('cfg-unit').value.trim() || 'units',
+        threshold,
+        reminderTime,
+        logs: {},
+        rules: [{
+          effectiveFrom: nowDateStr,
+          freq,
+          specificDays,
+          rollingTarget,
+          target,
+          threshold
+        }]
+      });
+
+      state.commitments.push(newCommitment);
+      await syncItemReminder(newCommitment);
+    }
+
     saveState();
-    e.target.reset();
-    document.getElementById('cfg-start').value = getLocalDateStr();
-    document.getElementById('box-specific-days').classList.add('hidden');
-    document.getElementById('box-rolling-days').classList.add('hidden');
-    document.getElementById('box-spectrum').classList.add('hidden');
     modal.classList.add('hidden');
+    resetModalToCreateMode();
     renderAll();
   });
 
   document.getElementById('btn-export-csv').onclick = () => {
-    const rows = [['commitment_id', 'title', 'mode', 'date', 'logged_value', 'target', 'threshold_pct']];
+    const rows = [['commitment_id', 'title', 'mode', 'date', 'logged_value', 'target_on_date', 'threshold_pct_on_date']];
     state.commitments.forEach(c => {
       generateSlots(c).forEach(s => {
         const val = c.logs[s.date] !== undefined ? c.logs[s.date] : '';
-        rows.push([c.id, `"${c.title.replace(/"/g, '""')}"`, c.mode, s.date, val, c.target || 1, c.threshold || 100]);
+        rows.push([c.id, `"${c.title.replace(/"/g, '""')}"`, c.mode, s.date, val, s.rule.target, s.rule.threshold]);
       });
     });
     downloadFile(rows.map(r => r.join(',')).join('\n'), `ccc-tracker-${getLocalDateStr()}.csv`, 'text/csv');
@@ -763,6 +1015,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const parsed = JSON.parse(ev.target.result);
         if (!Array.isArray(parsed.commitments)) throw new Error('Invalid format');
+        parsed.commitments = parsed.commitments.map(normalizeCommitment);
         state = parsed;
         saveState();
         renderAll();
