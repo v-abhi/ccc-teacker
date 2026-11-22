@@ -39,6 +39,8 @@ jobs:
 
       - name: Build Debug APK (Installable directly on Android)
         run: |
+          # Increment versionCode on every workflow run so Android accepts in-place updates
+          sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" android/app/build.gradle
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
