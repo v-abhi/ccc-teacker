@@ -49,15 +49,16 @@
   <!-- TAB 4: BACKUP, SHARE & ABOUT -->
   <main id="view-backup" class="view">
     <div class="list-stack">
+      <!-- Global daily wrap-up reminder before midnight lock -->
       <section class="card">
         <h2>Daily Check-In Reminder</h2>
         <p class="muted">Receive one daily notification to log your open commitments before the midnight lock.</p>
-        <div class="reminder-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;">
-          <input type="time" id="cfg-reminder-time" value="21:30" style="width:auto;margin:0;" />
+        <div class="reminder-row">
+          <input type="time" id="cfg-reminder-time" value="21:30" />
           <button id="btn-save-reminder" class="btn-primary btn-sm">Enable Reminder</button>
           <button id="btn-disable-reminder" class="btn-secondary btn-sm hidden">Turn Off</button>
         </div>
-        <p id="reminder-status" class="muted" style="margin-top:8px;font-size:0.76rem;">Reminder is currently off.</p>
+        <p id="reminder-status" class="reminder-status">Reminder is currently off.</p>
       </section>
 
       <section class="card">
@@ -96,24 +97,31 @@
     </div>
   </main>
 
-  <!-- NEW COMMITMENT MODAL -->
+  <!-- NEW / EDIT COMMITMENT MODAL -->
   <div id="modal-new" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>New Commitment</h2>
+        <h2 id="modal-heading">New Commitment</h2>
         <button id="btn-close-modal" class="btn-icon">&times;</button>
       </div>
       <form id="form-commitment">
+        <!-- Point 1: Start date is fixed to today automatically so creation stays fast and cannot backdate -->
+        <div class="fixed-start-banner">
+          <span>Start Date: <strong id="cfg-start-label">Today</strong></span>
+          <span class="muted-sm">Fixed to Today</span>
+        </div>
+
         <label>Task Title
           <input type="text" id="cfg-title" placeholder="e.g., Read Thinking, Fast and Slow" required />
         </label>
 
         <div class="row-2">
-          <label>Start Date
-            <input type="date" id="cfg-start" required />
-          </label>
           <label>Total Scheduled Days
             <input type="number" id="cfg-days" min="1" max="365" value="20" required />
+          </label>
+          <!-- Point 2: Optional per-commitment daily local reminder time -->
+          <label>Daily Reminder (Optional)
+            <input type="time" id="cfg-item-reminder" />
           </label>
         </div>
 
@@ -167,7 +175,7 @@
 
         <div class="modal-actions">
           <button type="button" id="btn-cancel-modal" class="btn-secondary">Cancel</button>
-          <button type="submit" class="btn-primary">Create</button>
+          <button type="submit" id="btn-submit-commitment" class="btn-primary">Create</button>
         </div>
       </form>
     </div>
@@ -181,17 +189,6 @@
     <button class="nav-btn" data-target="view-backup">More</button>
   </nav>
 
-  <script>
-    window.onerror = function(msg, url, line) {
-      const box = document.getElementById('dashboard-list');
-      if (box) {
-        box.innerHTML = `<div style="background:#7f1d1d;color:#fff;padding:12px;border-radius:8px;font-size:13px;">
-          <strong>JS Error:</strong> ${msg}<br><strong>Line:</strong> ${line}
-        </div>`;
-      }
-    };
-  </script>
-  <script src="app.js?v=9"></script>
-
+  <script src="app.js?v=10"></script>
 </body>
 </html>
