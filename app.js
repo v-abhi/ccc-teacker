@@ -110,6 +110,35 @@ async function mirrorBackupToAndroidDocuments() {
   } catch {}
 }
 
+
+/* Automatically restores saved data from Documents/CCCTracker if local storage is empty after reinstall */
+async function restoreMirrorBackupFromAndroidDocuments() {
+  try {
+    const cap = window.Capacitor;
+    if (!cap || !cap.isNativePlatform || !cap.isNativePlatform()) return false;
+    const { Filesystem } = cap.Plugins;
+    if (!Filesystem) return false;
+
+    const res = await Filesystem.readFile({
+      path: 'CCCTracker/ccc-auto-backup.json',
+      directory: 'DOCUMENTS',
+      encoding: 'utf8'
+    });
+
+    const parsed = JSON.parse(typeof res.data === 'string' ? res.data : '');
+    if (!Array.isArray(parsed.commitments)) return false;
+
+    parsed.commitments = parsed.commitments.map(normalizeCommitment);
+    state = parsed;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    renderAll();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
 /* Point 6: Generate scheduled slots using whichever rule applies on each cursor date */
 function generateSlots(c) {
   normalizeCommitment(c);
