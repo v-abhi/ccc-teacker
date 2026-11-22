@@ -9,7 +9,7 @@ let calendarViewMonth = new Map();
 let lastRenderedDate = '';
 let editingCommitmentId = null;
 
-/* Theme Management (Daylight / Nightlight) */
+/* Theme Management (Daylight  / Nightlight) */
 function applyTheme(theme) {
   const mode = theme === 'light' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', mode);
