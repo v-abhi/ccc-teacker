@@ -13,13 +13,11 @@
   --green-text: #4ade80;
   --yellow: #eab308;
   --yellow-text: #0f172a;
-  /* Compliance tiers & status highlights for Dark theme */
-  --comp-high: #4ade80;
-  --comp-mid: #fda4af;
-  --comp-low: #f87171;
-  --stat-rem: #38bdf8;
-  --stat-part: #facc15;
-  --stat-miss: #f87171;
+  --comp-high: #22c55e;
+  --comp-mid: #f97316;
+  --comp-low: #ef4444;
+  --stat-part: #f97316;
+  --stat-miss: #ef4444;
   --missed-gray: #4b5563;
   --blank-cell: #090b0e;
   --future-bg: #1e2433;
@@ -36,18 +34,16 @@
   --border: #d8e0ea;
   --text: #0f172a;
   --muted: #475569;
-  --accent: #38BDF8;
-  --accent-text: #ffffff;
+  --accent: #38bdf8;
+  --accent-text: #09131c;
   --green: #15803d;
   --green-text: #15803d;
   --yellow: #eab308;
   --yellow-text: #0f172a;
-  /* Compliance tiers & status highlights for Light theme */
-  --comp-high: #15803d;
-  --comp-mid: #e11d48;
-  --comp-low: #b91c1c;
-  --stat-rem: #0284c7;
-  --stat-part: #b45309;
+  --comp-high: #16a34a;
+  --comp-mid: #ea580c;
+  --comp-low: #dc2626;
+  --stat-part: #ea580c;
   --stat-miss: #dc2626;
   --missed-gray: #9ca3af;
   --blank-cell: #e9eef5;
@@ -85,7 +81,7 @@ body {
 }
 
 .app-header h1 { font-size: 1.12rem; font-weight: 700; letter-spacing: -0.01em; }
-.subtitle { font-size: 0.74rem; color: var(--muted); margin-top: 2px; }
+.subtitle { font-size: 0.74rem; color: var(--accent); font-weight: 600; margin-top: 2px; }
 .header-actions { display: flex; align-items: center; gap: 8px; }
 
 .badge {
@@ -330,7 +326,6 @@ body {
   background: var(--blank-cell);
 }
 
-/* Point 3: Underline today's date cell even on unscheduled off-days */
 .cal-cell.is-today-marker {
   border-bottom: 2.5px solid var(--accent);
   color: var(--text);
@@ -357,32 +352,45 @@ body {
 .cal-cell.today { background: var(--future-bg); border: 1.5px solid var(--accent); color: var(--text); }
 .cal-cell.future { background: var(--future-bg); border: 1px solid var(--future-border); color: var(--text); }
 
-/* TAB 3: ANALYTICS CARDS WITH LEFT VERTICAL LINE & 3-COLUMN METRICS */
+/* TAB 3: COMPACT 2-LINE ANALYTICS CARDS */
 .ana-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3.5px solid var(--accent);
   border-radius: 12px;
-  padding: 14px 16px;
+  padding: 13px 15px;
   box-shadow: var(--shadow);
 }
 .ana-card.completed-card {
   opacity: 0.82;
   background: var(--surface-muted);
-  border-left-color: var(--muted);
 }
 
-/* Line 1: Commitment name on left, Edit & Delete actions on right */
 .ana-row-1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
 }
+.ana-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .ana-title {
-  font-size: 1.02rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ana-streak {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .ana-right-top {
   display: flex;
@@ -410,69 +418,51 @@ body {
 .btn-icon-action.edit:hover { color: var(--accent); }
 .btn-icon-action.del:hover { color: #ef4444; }
 
-/* Line 2: 3-column grid keeps completed left, compliance centered, overall right */
-.ana-row-2 {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: baseline;
-  gap: 6px;
-  margin-top: 12px;
-}
-.ana-completed-txt {
-  font-size: 0.88rem;
-  font-weight: 700;
-  color: var(--text);
-  text-align: left;
+.ana-metrics-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.ana-compliance-mid {
-  font-size: 0.8rem;
+.ana-count {
+  color: var(--text);
+  font-weight: 700;
+}
+.ana-compliance.tier-high { color: var(--comp-high); }
+.ana-compliance.tier-mid { color: var(--comp-mid); }
+.ana-compliance.tier-low { color: var(--comp-low); }
+
+.ana-icon-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+}
+.stat-part { color: var(--stat-part); }
+.stat-miss { color: var(--stat-miss); }
+
+.ana-overall {
   color: var(--muted);
   font-weight: 600;
-  text-align: center;
-  white-space: nowrap;
-}
-.ana-compliance-mid strong.comp-high { color: var(--comp-high); }
-.ana-compliance-mid strong.comp-mid { color: var(--comp-mid); }
-.ana-compliance-mid strong.comp-low { color: var(--comp-low); }
-.ana-compliance-mid strong.comp-neutral { color: var(--muted); }
-
-.ana-overall-txt {
-  font-size: 0.8rem;
-  color: var(--muted);
-  font-weight: 500;
-  text-align: right;
-  white-space: nowrap;
 }
 
 .ana-bar {
-  height: 7px;
+  height: 6px;
   background: var(--surface-alt);
   border-radius: 99px;
   overflow: hidden;
-  margin: 8px 0 10px;
+  margin-top: 9px;
 }
 .ana-bar-fill {
   height: 100%;
   background: var(--accent);
   border-radius: 99px;
   transition: width 0.25s ease;
-}
-
-/* Line 3: Colored remaining, partial, missed counts + streak only when > 0 */
-.ana-row-3 {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-.stat-rem { color: var(--stat-rem); font-weight: 600; }
-.stat-part { color: var(--stat-part); font-weight: 600; }
-.stat-miss { color: var(--stat-miss); font-weight: 600; }
-.ana-streak {
-  font-weight: 700;
-  color: var(--text);
 }
 
 /* TAB 4 CARDS & REMINDER CONTROLS */
