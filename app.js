@@ -742,6 +742,18 @@ function escapeHtml(str) {
   return str.replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
 }
 
+function updateTodayLabel() {
+  const el = document.getElementById('today-label');
+  if (!el) return;
+
+  el.textContent = new Date().toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZoneName: 'short'
+  });
+}
+
 function updateCountdown() {
   syncDateIfRolledOver();
   const now = new Date();
