@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'ccc_tracker_v3';
 const THEME_KEY = 'ccc_tracker_theme';
 const REMINDER_KEY = 'ccc_tracker_reminder';
-const APP_PUBLIC_URL = 'https://v-abhi.github.io/ccc-teacker/';
+const APP_PUBLIC_URL = 'https://v-abhi.github.io/ccc-tracker/';
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 let expandedAccordions = new Set();
